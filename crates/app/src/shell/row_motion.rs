@@ -151,6 +151,10 @@ mod tests {
 
     #[test]
     fn rows_start_where_they_were_drawn_when_the_order_changes() {
+        // With Windows animations off (as on CI runners) every motion jumps to its end.
+        if motion::reduced() {
+            return;
+        }
         let (a, b) = (TabId::next(), TabId::next());
         let mut motion = RowMotion::default();
         frame(&mut motion, &[(a, 0.0), (b, 32.0)]);
@@ -178,6 +182,10 @@ mod tests {
 
     #[test]
     fn a_dropped_row_glides_from_the_pointer() {
+        // With Windows animations off (as on CI runners) every motion jumps to its end.
+        if motion::reduced() {
+            return;
+        }
         let (a, b) = (TabId::next(), TabId::next());
         let mut motion = RowMotion::default();
         frame(&mut motion, &[(a, 0.0), (b, 32.0)]);
