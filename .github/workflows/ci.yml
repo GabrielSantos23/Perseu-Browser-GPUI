@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Tests
+        run: cargo test --locked
+
+  supply-chain:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install audit tools
+        run: cargo install cargo-audit cargo-deny --locked
+      - name: cargo audit
+        run: cargo audit --deny warnings
+      - name: cargo deny
+        run: cargo deny --locked check

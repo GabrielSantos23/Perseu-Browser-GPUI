@@ -1,0 +1,54 @@
+# Publishes a release when a version tag is pushed (git tag v0.2.0 && git push --tags).
+# The tag must match the workspace version in Cargo.toml. The installer is
+# attached to the GitHub release, where the app's updater finds it.
+#
+# Optional signing: add repository secrets SIGN_CERT_PFX (base64 of a .pfx)
+# and SIGN_CERT_PASSWORD; without them the build is unsigned.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      PERSEU_UPDATE_REPO: ${{ github.repository }}
+      SIGN_CERT_PFX: ${{ secrets.SIGN_CERT_PFX }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain
+      - name: Tag matches the crate version
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          if ("v$version" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} does not match Cargo.toml version $version" }
+      - name: Tests
+        run: cargo test --locked
+      - name: Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Import signing certificate
+        if: ${{ env.SIGN_CERT_PFX != '' }}
+        shell: pwsh
+        env:
+          SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "sign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_CERT_PFX))
+          $password = ConvertTo-SecureString $env:SIGN_CERT_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx
+          "PERSEU_SIGN_THUMBPRINT=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+      - name: Build installer
+        shell: pwsh
+        run: ./installer/build.ps1
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" (Get-ChildItem dist\perseu-setup-*.exe).FullName --title "${{ github.ref_name }}" --generate-notes

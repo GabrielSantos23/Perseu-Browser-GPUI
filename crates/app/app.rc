@@ -1,0 +1,23 @@
+1 ICON "assets/icon.ico"
+
+1 VERSIONINFO
+FILEVERSION VERSION_NUMBERS
+PRODUCTVERSION VERSION_NUMBERS
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "FileDescription", APP_NAME
+      VALUE "ProductName", APP_NAME
+      VALUE "InternalName", APP_NAME
+      VALUE "OriginalFilename", APP_EXE
+      VALUE "FileVersion", VERSION_TEXT
+      VALUE "ProductVersion", VERSION_TEXT
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

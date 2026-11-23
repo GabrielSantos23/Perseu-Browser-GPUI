@@ -1,0 +1,18 @@
+# Reviewed exceptions. CI runs `cargo audit --deny warnings`, so any new
+# advisory fails the build until it is fixed or reviewed here (see docs/SECURITY.md).
+[advisories]
+ignore = [
+    # Unmaintained, no known vulnerability; pulled in by gpui / gpui-component.
+    "RUSTSEC-2026-0543", # chrono
+    "RUSTSEC-2024-0384", # instant
+    "RUSTSEC-2024-0436", # paste (build-time macro)
+    "RUSTSEC-2024-0370", # proc-macro-error (build-time macro)
+    "RUSTSEC-2025-0134", # rustls-pemfile
+    "RUSTSEC-2026-0206", # rustybuzz
+    "RUSTSEC-2026-0192", # ttf-parser
+    # Linux-only dependencies of gpui and wry; never compiled for Windows.
+    "RUSTSEC-2026-0371", # zbus_names
+    "RUSTSEC-2026-0370", # zvariant
+    "RUSTSEC-2026-0372", # zvariant_derive
+    "RUSTSEC-2024-0429", # glib (unsound VariantStrIter)
+]

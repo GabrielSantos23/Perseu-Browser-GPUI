@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Identify</title></head>
+<body>
+<script>
+  // Hosts Shazam's signer in a Web Worker, as the Shazam extension does:
+  // the worker runs the extension's own glue and sigx.wasm and posts the
+  // signature back. Nothing here talks to the network.
+  let worker = null;
+  let waiting = null;
+
+  function bytes(base64) {
+    const text = atob(base64);
+    const out = new Uint8Array(text.length);
+    for (let i = 0; i < text.length; i++) out[i] = text.charCodeAt(i);
+    return out;
+  }
+
+  function toBase64(array) {
+    let text = "";
+    for (let i = 0; i < array.length; i += 32768) {
+      text += String.fromCharCode.apply(null, array.subarray(i, i + 32768));
+    }
+    return btoa(text);
+  }
+
+  function perseuLoad(glue, wasm) {
+    const source =
+      "self.Module = { wasmBinary: self.__wasm, onRuntimeInitialized() { postMessage({ type: 'ready' }); } };\n" +
+      glue +
+      "\nself.onmessage = (event) => {" +
+      "  const pcm = event.data.pcm;" +
+      "  const pointer = Module._malloc(4 * pcm.length);" +
+      "  Module.HEAPF32.set(pcm, pointer / 4);" +
+      "  Module.ccall('extract_signature', null, ['number', 'number', 'number', 'number'], [0, event.data.rate, pointer, pcm.length], { async: true });" +
+      "  Module._free(pointer);" +
+      "};";
+    const prelude = "self.__wasm = Uint8Array.from(atob(" + JSON.stringify(wasm) + "), (c) => c.charCodeAt(0));\n";
+    return new Promise((resolve) => {
+      try {
+        worker = new Worker(URL.createObjectURL(new Blob([prelude + source], { type: "text/javascript" })));
+      } catch (error) {
+        resolve("error: " + error);
+        return;
+      }
+      worker.onerror = (event) => resolve("error: " + event.message);
+      worker.onmessage = (event) => {
+        if (event.data.type === "ready") {
+          worker.onmessage = (message) => {
+            if (!waiting) return;
+            const done = waiting;
+            waiting = null;
+            done(message.data.type === "sigready" ? toBase64(new Uint8Array(message.data.signatureArray.buffer)) : "");
+          };
+          resolve("ready");
+        }
+      };
+    });
+  }
+
+  function perseuSign(pcm, rate) {
+    if (!worker || waiting) return Promise.resolve("");
+    return new Promise((resolve) => {
+      waiting = resolve;
+      setTimeout(() => {
+        if (waiting === resolve) {
+          waiting = null;
+          resolve("");
+        }
+      }, 20000);
+      worker.postMessage({ pcm: new Float32Array(bytes(pcm).buffer), rate });
+    });
+  }
+</script>
+</body>
+</html>
