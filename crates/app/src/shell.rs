@@ -181,9 +181,13 @@ impl Shell {
                 shell.window_placement = Some(persist::placement(window));
                 cx.notify();
             }),
-            cx.observe_window_activation(window, |shell, window, _| {
+            cx.observe_window_activation(window, |shell, window, cx| {
                 if window.is_window_active() && shell.page_had_focus.get() {
                     shell.focus_active_page();
+                }
+                // Back from Windows Settings, the default-browser row reads again.
+                if window.is_window_active() && shell.settings_page.is_some() {
+                    cx.notify();
                 }
             }),
             cx.observe_window_appearance(window, |_, _, cx| cx.notify()),

@@ -13,8 +13,12 @@ const PROG_ID_SUFFIX: &str = "HTML";
 const DESCRIPTION: &str = "A sidebar-first web browser";
 const URL_SCHEMES: [&str; 2] = ["http", "https"];
 const FILE_TYPES: [&str; 2] = [".htm", ".html"];
-const USER_CHOICE: &str =
-    r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice";
+/// Where Windows records the https choice: recent Windows 11 builds write
+/// `UserChoiceLatest\ProgId`, older ones `UserChoice`.
+const USER_CHOICES: [&str; 2] = [
+    r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoiceLatest\ProgId",
+    r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice",
+];
 const MAX_PROG_ID_UNITS: usize = 256;
 const SHELL_EXECUTE_ERROR_LIMIT: usize = 32;
 
@@ -73,12 +77,19 @@ pub fn register() -> Result<()> {
 
 /// Whether the user picked this app for https links.
 pub fn is_default() -> bool {
+    USER_CHOICES
+        .iter()
+        .find_map(|key| read_prog_id(key))
+        .is_some_and(|chosen| chosen == prog_id())
+}
+
+fn read_prog_id(key: &str) -> Option<String> {
     let mut buffer = [0u16; MAX_PROG_ID_UNITS];
     let mut size = (buffer.len() * size_of::<u16>()) as u32;
     let read = unsafe {
         RegGetValueW(
             HKEY_CURRENT_USER,
-            &HSTRING::from(USER_CHOICE),
+            &HSTRING::from(key),
             &HSTRING::from("ProgId"),
             RRF_RT_REG_SZ,
             None,
@@ -87,21 +98,25 @@ pub fn is_default() -> bool {
         )
     };
     if read.is_err() {
-        return false;
+        return None;
     }
     let units = (size as usize / size_of::<u16>()).saturating_sub(1);
-    String::from_utf16_lossy(&buffer[..units.min(buffer.len())]) == prog_id()
+    Some(String::from_utf16_lossy(&buffer[..units.min(buffer.len())])).filter(|id| !id.is_empty())
 }
 
 /// Opens Windows' Default apps page, on this app's entry where supported.
+/// Runs on its own thread: ShellExecute pumps window messages while it
+/// waits, which would re-enter the UI in the middle of a click.
 pub fn open_default_apps() {
-    let page = HSTRING::from(format!(
-        "ms-settings:defaultapps?registeredAppUser={APP_NAME}"
-    ));
-    let result = unsafe { ShellExecuteW(None, w!("open"), &page, None, None, SW_SHOWNORMAL) };
-    if result.0 as usize <= SHELL_EXECUTE_ERROR_LIMIT {
-        tracing::warn!("could not open Default apps (code {})", result.0 as usize);
-    }
+    std::thread::spawn(|| {
+        let page = HSTRING::from(format!(
+            "ms-settings:defaultapps?registeredAppUser={APP_NAME}"
+        ));
+        let result = unsafe { ShellExecuteW(None, w!("open"), &page, None, None, SW_SHOWNORMAL) };
+        if result.0 as usize <= SHELL_EXECUTE_ERROR_LIMIT {
+            tracing::warn!("could not open Default apps (code {})", result.0 as usize);
+        }
+    });
 }
 
 fn set(key: &str, name: Option<&str>, value: &str) -> Result<()> {
