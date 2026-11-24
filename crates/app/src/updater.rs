@@ -3,7 +3,7 @@
 //! (`PERSEU_UPDATE_REPO`); builds without it never check.
 
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result};
 
@@ -45,9 +45,8 @@ pub fn check() -> Result<Option<Release>> {
     Ok(newer_release(&reply, repo, CURRENT))
 }
 
-/// Downloads the installer and starts it quietly. It closes this app,
-/// installs over it and opens it again; the caller should quit.
-pub fn install(release: &Release) -> Result<()> {
+/// Downloads the release's installer to the temp folder.
+pub fn download(release: &Release) -> Result<PathBuf> {
     let target: PathBuf =
         std::env::temp_dir().join(format!("{INSTALLER_PREFIX}{}.exe", release.version));
     let path = target.to_string_lossy().into_owned();
@@ -58,10 +57,18 @@ pub fn install(release: &Release) -> Result<()> {
         &path,
         &release.installer,
     ])?;
-    std::process::Command::new(&target)
-        .args(["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"])
-        .spawn()
-        .context("could not start the installer")?;
+    Ok(target)
+}
+
+/// Starts a downloaded installer quietly. It waits for this app to close,
+/// installs over it and, with `reopen`, starts it again; the caller quits.
+pub fn run_installer(installer: &Path, reopen: bool) -> Result<()> {
+    let mut command = std::process::Command::new(installer);
+    command.args(["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]);
+    if !reopen {
+        command.arg("/NORELAUNCH");
+    }
+    command.spawn().context("could not start the installer")?;
     Ok(())
 }
 

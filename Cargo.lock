@@ -189,7 +189,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "browser-core",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "browser-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "flate2",
@@ -8126,7 +8126,7 @@ dependencies = [
 
 [[package]]
 name = "webview-host"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "raw-window-handle",

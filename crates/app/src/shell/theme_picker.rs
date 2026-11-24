@@ -4,6 +4,8 @@ use gpui::{
 };
 use raw_window_handle::HasWindowHandle;
 
+use browser_core::settings::ColorScheme;
+
 use super::Shell;
 use super::menus::SpaceAction;
 use crate::native;
@@ -73,6 +75,7 @@ impl Shell {
             state: space.theme_state.clone(),
             custom_colors: self.settings.custom_colors.clone(),
             can_delete,
+            scheme: self.settings.color_scheme,
         };
         let mut picker: Option<Entity<ThemePicker>> = None;
         let opened = cx.open_window(options, |popup, cx| {
@@ -111,6 +114,18 @@ impl Shell {
                     let colors = colors.clone();
                     shell.update_settings(|settings| settings.custom_colors = colors, cx);
                 }
+                ThemePickerEvent::Scheme(scheme) => {
+                    let scheme = *scheme;
+                    shell.update_settings(|settings| settings.color_scheme = scheme, cx);
+                    let light = shell.page_scheme();
+                    for view in shell
+                        .runtime
+                        .values()
+                        .filter_map(|runtime| runtime.view.as_ref())
+                    {
+                        view.set_color_scheme(light);
+                    }
+                }
                 ThemePickerEvent::Renamed(name) => shell.browser.space_mut().name = name.clone(),
                 ThemePickerEvent::SetIcon { name, color } => {
                     let space = shell.browser.space_mut();
@@ -137,5 +152,28 @@ impl Shell {
             window: handle.into(),
             _events: events,
         });
+    }
+}
+
+impl Shell {
+    /// Whether the app shows its light colors, from the setting or Windows.
+    pub(super) fn wants_light(&self, window: &Window) -> bool {
+        match self.settings.color_scheme {
+            ColorScheme::Light => true,
+            ColorScheme::Dark => false,
+            ColorScheme::System => matches!(
+                window.appearance(),
+                gpui::WindowAppearance::Light | gpui::WindowAppearance::VibrantLight
+            ),
+        }
+    }
+
+    /// The look pages are asked for; `None` lets them follow Windows.
+    pub(super) fn page_scheme(&self) -> Option<bool> {
+        match self.settings.color_scheme {
+            ColorScheme::System => None,
+            ColorScheme::Light => Some(true),
+            ColorScheme::Dark => Some(false),
+        }
     }
 }

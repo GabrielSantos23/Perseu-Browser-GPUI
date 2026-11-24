@@ -21,9 +21,12 @@ use gpui::{
 };
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 
+use crate::context_menu::{MENU_CORNER, MenuColors};
 use crate::icons;
 use crate::theme::Theme;
 use crate::tooltip::{Side, tooltip, tooltip_on};
+use browser_core::settings::ColorScheme;
+use gpui::prelude::FluentBuilder as _;
 use zen::{Action, Dot, DotKind, PAD, PRESETS, PRESETS_PER_PAGE};
 
 const PANEL_PADDING: f32 = 10.;
@@ -64,6 +67,7 @@ pub enum ThemePickerEvent {
         color: Option<u32>,
     },
     CustomColors(Vec<u32>),
+    Scheme(ColorScheme),
     Delete,
     Dismiss,
 }
@@ -80,6 +84,7 @@ pub struct SpaceLook {
     pub state: Option<String>,
     pub custom_colors: Vec<u32>,
     pub can_delete: bool,
+    pub scheme: ColorScheme,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -105,6 +110,7 @@ pub struct ThemePicker {
     page: usize,
     custom_colors: Vec<u32>,
     can_delete: bool,
+    scheme: ColorScheme,
     dragging: Option<Drag>,
     pad: Rc<Cell<Bounds<Pixels>>>,
     wave: Rc<Cell<Bounds<Pixels>>>,
@@ -195,6 +201,7 @@ impl ThemePicker {
             page: 0,
             custom_colors: look.custom_colors,
             can_delete: look.can_delete,
+            scheme: look.scheme,
             dragging: None,
             pad: Rc::default(),
             wave: Rc::default(),
@@ -222,6 +229,7 @@ impl ThemePicker {
         let hover_bg = theme.colors.surface_hover;
         let selected_bg = theme.colors.surface_active;
         let ring = theme.colors.text;
+        let menu = MenuColors::of(cx);
         let current_color = self.icon_color;
         let colors = std::iter::once(None)
             .chain(ICON_COLORS.iter().copied().map(Some))
@@ -288,10 +296,10 @@ impl ThemePicker {
             .flex_col()
             .gap(px(GAP))
             .p(px(PANEL_PADDING))
-            .rounded(metrics.radius_popover)
-            .bg(theme.colors.surface_raised)
+            .rounded(MENU_CORNER)
+            .bg(menu.background)
             .border_1()
-            .border_color(theme.colors.border)
+            .border_color(menu.border)
             .child(
                 div()
                     .flex()
@@ -299,7 +307,7 @@ impl ThemePicker {
                     .justify_between()
                     .pb(px(GAP))
                     .border_b_1()
-                    .border_color(theme.colors.border)
+                    .border_color(menu.separator)
                     .children(colors),
             )
             .child(
@@ -656,18 +664,32 @@ impl ThemePicker {
             .flex()
             .justify_center()
             .gap(px(5.))
-            .child(
-                button("scheme-auto", icons::SCHEME_AUTO, false)
-                    .tooltip(tooltip("Follow the system (dark only for now)")),
-            )
-            .child(
-                button("scheme-light", icons::SCHEME_LIGHT, false)
-                    .tooltip(tooltip("Light (not available yet)")),
-            )
-            .child(
-                button("scheme-dark", icons::SCHEME_DARK, true)
-                    .bg(hover_bg)
-                    .tooltip(tooltip("Dark")),
+            .children(
+                [
+                    (
+                        "scheme-auto",
+                        icons::SCHEME_AUTO,
+                        ColorScheme::System,
+                        "Follow Windows",
+                    ),
+                    (
+                        "scheme-light",
+                        icons::SCHEME_LIGHT,
+                        ColorScheme::Light,
+                        "Light",
+                    ),
+                    ("scheme-dark", icons::SCHEME_DARK, ColorScheme::Dark, "Dark"),
+                ]
+                .map(|(id, glyph, scheme, label)| {
+                    button(id, glyph, true)
+                        .when(self.scheme == scheme, |button| button.bg(hover_bg))
+                        .tooltip(tooltip(label))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.scheme = scheme;
+                            cx.emit(ThemePickerEvent::Scheme(scheme));
+                            cx.notify();
+                        }))
+                }),
             );
         let can_add = has_dots && self.dots.len() < zen::MAX_DOTS;
         let can_cycle = self.dots.len() >= 2;
@@ -1048,6 +1070,7 @@ impl Render for ThemePicker {
         let theme = Theme::of(cx);
         let metrics = &theme.metrics;
         let hover_bg = theme.colors.surface_hover;
+        let menu = MenuColors::of(cx);
         let panel = div()
             .id("theme-picker")
             .track_focus(&self.focus_handle)
@@ -1057,14 +1080,14 @@ impl Render for ThemePicker {
             .flex_col()
             .gap(px(GAP))
             .p(px(PANEL_PADDING))
-            .rounded(metrics.radius_popover)
-            .bg(theme.colors.surface_raised)
+            .rounded(MENU_CORNER)
+            .bg(menu.background)
             .border_1()
-            .border_color(theme.colors.border)
+            .border_color(menu.border)
             .font_family(theme.fonts.ui.clone())
             .font_weight(theme.fonts.ui_weight)
             .text_size(metrics.text_md)
-            .text_color(theme.colors.text)
+            .text_color(menu.text)
             .on_key_down(cx.listener(|_, event: &gpui::KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" {
                     cx.emit(ThemePickerEvent::Dismiss);

@@ -40,6 +40,20 @@ impl PeekModifier {
     }
 }
 
+/// Light or dark look, for the app and for pages that offer both.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorScheme {
+    /// Always light.
+    Light,
+    /// Always dark.
+    Dark,
+    /// Follow Windows. Also used for values this version does not know.
+    #[default]
+    #[serde(other)]
+    System,
+}
+
 /// User preferences. Missing fields take their defaults.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -72,6 +86,8 @@ pub struct Settings {
     /// Check downloads with SmartScreen. With it on, files the check flags
     /// are held and never saved; with it off, every download is saved.
     pub download_safety_checks: bool,
+    /// Light, dark, or whatever Windows uses.
+    pub color_scheme: ColorScheme,
 }
 
 impl Default for Settings {
@@ -89,6 +105,7 @@ impl Default for Settings {
             custom_colors: Vec::new(),
             extensions: BTreeMap::new(),
             download_safety_checks: true,
+            color_scheme: ColorScheme::default(),
         }
     }
 }

@@ -28,7 +28,7 @@
 
 ## Install
 
-Download `perseu-setup-<version>.exe` from the [latest release](https://github.com/GabrielSantos23/Perseu-Browser-GPUI/releases/latest) and run it. No administrator rights are needed. Perseu updates itself from later releases: pick **Restart to update** in the sidebar menu when it offers one.
+Download `perseu-setup-<version>.exe` from the [latest release](https://github.com/GabrielSantos23/Perseu-Browser-GPUI/releases/latest) and run it. No administrator rights are needed. Perseu checks for a newer release each time it opens (or from **Settings → About → Check for updates**), downloads it in the background and installs it when you close the browser. Pick **Restart to update** to install it right away.
 
 ## Build from source
 

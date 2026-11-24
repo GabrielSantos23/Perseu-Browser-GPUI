@@ -7,6 +7,7 @@ mod essentials;
 mod extensions;
 mod favorites;
 mod folders;
+mod fullscreen;
 mod history_page;
 mod identify;
 mod media_player;
@@ -71,7 +72,8 @@ const APP_TITLE: &str = browser_core::APP_NAME;
 const GRAIN_ALPHA: f32 = 0.18;
 const POPUP_SETTLE: std::time::Duration = std::time::Duration::from_millis(30);
 const ESSENTIALS_HINT: std::time::Duration = std::time::Duration::from_millis(180);
-const UPDATE_FIRST_CHECK: std::time::Duration = std::time::Duration::from_secs(15);
+/// The first check runs each time the browser opens, once startup settles.
+const UPDATE_FIRST_CHECK: std::time::Duration = std::time::Duration::from_secs(3);
 const UPDATE_CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 
 type TabEvent = (TabId, WebViewEvent);
@@ -85,6 +87,7 @@ pub struct Shell {
     command_bar: Option<command::OpenCommandBar>,
     content_bounds: Rc<Cell<Bounds<Pixels>>>,
     compact: bool,
+    fullscreen: Option<fullscreen::Fullscreen>,
     reveal: crate::motion::Toggle,
     compact_hover: compact::HoverTimers,
     title_reveal: crate::motion::Toggle,
@@ -140,6 +143,9 @@ pub struct Shell {
     history_page: Option<history_page::HistoryPage>,
     /// A newer release, once the update check found one.
     update: Option<crate::updater::Release>,
+    /// The newer release's installer, once downloaded; it runs on quit.
+    update_download: Option<std::path::PathBuf>,
+    update_check: UpdateCheck,
     saved_session: Option<Session>,
     session_save: Option<Task<()>>,
     sidebar_width: Pixels,
@@ -180,8 +186,14 @@ impl Shell {
                     shell.focus_active_page();
                 }
             }),
+            cx.observe_window_appearance(window, |_, _, cx| cx.notify()),
             cx.on_app_quit(|shell, _| {
                 shell.save_session_now();
+                if let Some(installer) = shell.update_download.take()
+                    && let Err(error) = crate::updater::run_installer(&installer, false)
+                {
+                    tracing::warn!("could not install the update on quit: {error:#}");
+                }
                 async {}
             }),
         ];
@@ -217,6 +229,7 @@ impl Shell {
             command_bar: None,
             content_bounds: Rc::default(),
             compact: false,
+            fullscreen: None,
             reveal: crate::motion::Toggle::new(compact::SLIDE),
             compact_hover: compact::HoverTimers::default(),
             title_reveal: crate::motion::Toggle::new(compact::SLIDE),
@@ -269,6 +282,8 @@ impl Shell {
             settings_page: None,
             history_page: None,
             update: None,
+            update_download: None,
+            update_check: UpdateCheck::Idle,
             saved_session: None,
             session_save: None,
             sidebar_width,
@@ -295,7 +310,8 @@ impl Shell {
         shell
     }
 
-    /// Looks for a newer release soon after start and then a few times a day.
+    /// Looks for a newer release each time the browser opens and then a few
+    /// times a day. A newer one downloads and installs when the app closes.
     fn watch_for_updates(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !crate::updater::enabled() {
             return;
@@ -305,32 +321,8 @@ impl Shell {
             loop {
                 cx.background_executor().timer(wait).await;
                 wait = UPDATE_CHECK_EVERY;
-                let found = cx
-                    .background_executor()
-                    .spawn(async { crate::updater::check() })
-                    .await;
-                let release = match found {
-                    Ok(release) => release,
-                    Err(error) => {
-                        tracing::info!("update check failed: {error:#}");
-                        continue;
-                    }
-                };
                 let alive = shell.update_in(cx, |shell, window, cx| {
-                    if let Some(release) = release
-                        && shell.update.as_ref() != Some(&release)
-                    {
-                        shell.show_toast(
-                            format!(
-                                "Version {} is ready. Restart from the menu.",
-                                release.version
-                            ),
-                            window,
-                            cx,
-                        );
-                        shell.update = Some(release);
-                        cx.notify();
-                    }
+                    shell.check_for_updates(false, window, cx)
                 });
                 if alive.is_err() {
                     break;
@@ -340,20 +332,105 @@ impl Shell {
         .detach();
     }
 
-    /// Downloads and starts the installer, then quits so it can replace us.
+    /// Asks GitHub for a newer release; `asked` reports the outcome even
+    /// when there is nothing new, for the button in settings.
+    pub(super) fn check_for_updates(
+        &mut self,
+        asked: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.update_check == UpdateCheck::Checking {
+            return;
+        }
+        self.update_check = UpdateCheck::Checking;
+        cx.notify();
+        cx.spawn_in(window, async move |shell, cx| {
+            let found = cx
+                .background_executor()
+                .spawn(async { crate::updater::check() })
+                .await;
+            shell
+                .update_in(cx, |shell, window, cx| {
+                    shell.update_check = match &found {
+                        Ok(_) => UpdateCheck::Done,
+                        Err(error) => {
+                            tracing::info!("update check failed: {error:#}");
+                            UpdateCheck::Failed(format!("{error:#}"))
+                        }
+                    };
+                    match found {
+                        Ok(Some(release)) => shell.found_update(release, window, cx),
+                        Ok(None) if asked => shell.show_toast("perseu is up to date", window, cx),
+                        _ => {}
+                    }
+                    cx.notify();
+                })
+                .ok();
+        })
+        .detach();
+    }
+
+    fn found_update(
+        &mut self,
+        release: crate::updater::Release,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.update.as_ref() == Some(&release) {
+            return;
+        }
+        self.show_toast(
+            format!("Version {} installs when you close perseu", release.version),
+            window,
+            cx,
+        );
+        self.update = Some(release.clone());
+        self.update_download = None;
+        cx.spawn_in(window, async move |shell, cx| {
+            let wanted = release.clone();
+            let downloaded = cx
+                .background_executor()
+                .spawn(async move { crate::updater::download(&wanted) })
+                .await;
+            shell
+                .update_in(cx, |shell, _, cx| match downloaded {
+                    Ok(path) if shell.update.as_ref() == Some(&release) => {
+                        shell.update_download = Some(path);
+                        cx.notify();
+                    }
+                    Ok(_) => {}
+                    Err(error) => tracing::warn!("update download failed: {error:#}"),
+                })
+                .ok();
+        })
+        .detach();
+    }
+
+    /// Installs the newer release now: downloads it if needed, starts the
+    /// installer and quits so it can replace us and reopen.
     pub(super) fn install_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(release) = self.update.clone() else {
             return;
         };
-        self.show_toast(
-            format!("Downloading version {}\u{2026}", release.version),
-            window,
-            cx,
-        );
+        let ready = self.update_download.take();
+        if ready.is_none() {
+            self.show_toast(
+                format!("Downloading version {}\u{2026}", release.version),
+                window,
+                cx,
+            );
+        }
         cx.spawn_in(window, async move |shell, cx| {
             let installed = cx
                 .background_executor()
-                .spawn(async move { crate::updater::install(&release) })
+                .spawn(async move {
+                    let installer = match ready {
+                        Some(path) => path,
+                        None => crate::updater::download(&release)?,
+                    };
+                    crate::updater::run_installer(&installer, true)
+                })
                 .await;
             shell
                 .update_in(cx, |shell, window, cx| match installed {
@@ -485,14 +562,16 @@ impl Shell {
             WebViewEvent::NewWindowRequested { url, request, .. }
                 if url.starts_with("chrome-extension:") =>
             {
-                self.open_extension_window(url, request, OpenPosition::After(id), window, cx)
+                self.open_popup_tab(url, request, OpenPosition::After(id), window, cx)
             }
             WebViewEvent::NewWindowRequested {
                 url,
                 user_initiated,
+                request,
                 ..
-            } => self.on_new_window_request(id, url, user_initiated, window, cx),
+            } => self.on_new_window_request(id, url, user_initiated, request, window, cx),
             WebViewEvent::CloseRequested => self.close_tab(id, window, cx),
+            WebViewEvent::FullscreenChanged(on) => self.on_page_fullscreen(id, on, window, cx),
             WebViewEvent::PermissionRequested {
                 id: request,
                 url,
@@ -504,10 +583,17 @@ impl Shell {
                 user_initiated,
             } => self.on_external_scheme_request(id, uri, origin, user_initiated),
             WebViewEvent::SecurityChanged(state) => self.on_security_change(id, state),
-            WebViewEvent::AudioChanged { playing, muted } => self.update_runtime(id, |runtime| {
-                runtime.playing_audio = playing;
-                runtime.muted = muted;
-            }),
+            WebViewEvent::AudioChanged { playing, muted } => {
+                let was_playing = self
+                    .runtime
+                    .get(&id)
+                    .is_some_and(|runtime| runtime.playing_audio);
+                self.update_runtime(id, |runtime| {
+                    runtime.playing_audio = playing;
+                    runtime.muted = muted;
+                });
+                self.on_audio_changed(id, was_playing, playing, cx);
+            }
             WebViewEvent::PeekRequested(url) => self.open_peek(url, window, cx),
             event @ (WebViewEvent::DownloadStarted { .. }
             | WebViewEvent::DownloadProgress { .. }
@@ -759,6 +845,15 @@ fn forward_webview_events(
     .detach();
 }
 
+/// The last update check, for the settings page.
+#[derive(Clone, PartialEq)]
+pub(super) enum UpdateCheck {
+    Idle,
+    Checking,
+    Done,
+    Failed(String),
+}
+
 impl Shell {
     fn render_body(&self, reveal: f32, cx: &mut Context<Self>) -> gpui::AnyElement {
         let body = div()
@@ -785,8 +880,7 @@ impl Shell {
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let space = self.browser.space();
-        Theme::sync_scheme(space.theme, space.intensity, cx);
+        Theme::sync_scheme(self.wants_light(window), cx);
         if self.tab_drag.is_some() && !cx.has_active_drag() {
             self.tab_drag = None;
         }
@@ -799,7 +893,10 @@ impl Render for Shell {
         }
         self.sync_panel(window, cx);
         let reveal = self.advance_reveal(window);
-        let body = self.render_body(reveal, cx);
+        let body = match self.fullscreen {
+            Some(_) => self.render_fullscreen(cx),
+            None => self.render_body(reveal, cx),
+        };
         if self.row_motion.borrow().animating() {
             window.request_animation_frame();
         }
@@ -808,7 +905,9 @@ impl Render for Shell {
             title_bar = title_bar.center(self.render_site_title(cx));
         }
         let favorites_bar = self.render_favorites_bar(cx);
-        let (title_bar, favorites_bar, title_overlay) = if self.settings.hide_title_bar {
+        let (title_bar, favorites_bar, title_overlay) = if self.fullscreen.is_some() {
+            (None, None, None)
+        } else if self.settings.hide_title_bar {
             (
                 None,
                 None,
@@ -836,6 +935,7 @@ impl Render for Shell {
             .text_size(theme.metrics.text_md)
             .text_color(theme.colors.text)
             .when(self.resizing_sidebar, |root| root.cursor_col_resize())
+            .capture_any_mouse_down(|_, window, _| crate::tooltip::clicked(window))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::release_webview_focus))
             .when(self.resizing_split, |root| {
                 match self.active_split().map(|split| split.orientation) {
@@ -970,6 +1070,11 @@ impl Render for Shell {
             .on_action(
                 cx.listener(|this, _: &actions::ToggleCompactMode, window, cx| {
                     this.toggle_compact(window, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &actions::ToggleFullscreen, window, cx| {
+                    this.toggle_fullscreen(window, cx)
                 }),
             )
             .children(favorites_bar)

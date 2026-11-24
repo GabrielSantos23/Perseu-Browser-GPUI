@@ -98,6 +98,10 @@ impl Shell {
                     .truncate()
                     .child(title),
             )
+            .children(
+                self.tab_audio(id)
+                    .map(|muted| self.render_audio_button(id, muted, cx)),
+            )
             .into_any_element()
     }
 

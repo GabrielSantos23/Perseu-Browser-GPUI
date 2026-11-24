@@ -64,10 +64,16 @@ Root: HKCU; Subkey: "Software\Classes\{#ProgId}\shell\open\command"; ValueType: 
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
-; An update from the app runs silently and opens the app again when done.
-Filename: "{app}\{#AppExe}"; Flags: nowait; Check: WizardSilent
+; An update from the app runs silently and opens the app again when done,
+; unless it ran because the app was closing (/NORELAUNCH).
+Filename: "{app}\{#AppExe}"; Flags: nowait; Check: WizardSilent and not NoRelaunch
 
 [Code]
+function NoRelaunch(): Boolean;
+begin
+  Result := Pos('/NORELAUNCH', UpperCase(GetCmdTail())) > 0;
+end;
+
 function WebView2Installed(): Boolean;
 var
   Version: String;

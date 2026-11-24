@@ -128,9 +128,14 @@ fn on_new_window(
         let size = (has_size.as_bool() && width > 0 && height > 0)
             .then_some((f64::from(width), f64::from(height)));
         let url = take_pwstr(uri);
-        // Extensions use the window they get back (Bitwarden reads its id),
-        // so theirs wait for a real view instead of opening nothing.
-        let request = if url.starts_with("chrome-extension:") {
+        let user_initiated = user_initiated.as_bool();
+        let (ctrl, shift, alt) = held_modifiers();
+        let peek = user_initiated
+            && is_web_url(&url)
+            && peek_modifier.is_some_and(|modifier| peek_chord(modifier, ctrl, shift, alt));
+        // Openers use the window they get back (Bitwarden reads its id, sign-in
+        // popups post the result to `window.opener`), so they wait for a real view.
+        let request = if !peek {
             let deferral = unsafe { args.GetDeferral()? };
             let id = NEXT_PERMISSION_ID.fetch_add(1, Ordering::Relaxed);
             PENDING_WINDOWS.with(|pending| {
@@ -146,11 +151,6 @@ fn on_new_window(
         } else {
             None
         };
-        let user_initiated = user_initiated.as_bool();
-        let (ctrl, shift, alt) = held_modifiers();
-        let peek = user_initiated
-            && is_web_url(&url)
-            && peek_modifier.is_some_and(|modifier| peek_chord(modifier, ctrl, shift, alt));
         sink(if peek {
             WebViewEvent::PeekRequested(url)
         } else {

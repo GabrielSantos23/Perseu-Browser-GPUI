@@ -58,6 +58,7 @@ enum Feature {
     Downloads,
     Extensions,
     ToggleSidebar,
+    Fullscreen,
     Settings,
 }
 
@@ -185,6 +186,9 @@ impl Shell {
             MenuEntry::Separator,
             MenuEntry::item("Show/hide sidebar", Feature::ToggleSidebar)
                 .with_shortcut(keys(&actions::ToggleCompactMode)),
+            MenuEntry::item("Fullscreen", Feature::Fullscreen)
+                .with_shortcut(keys(&actions::ToggleFullscreen))
+                .with_check(self.fullscreen.is_some()),
             MenuEntry::item("Settings\u{2026}", Feature::Settings)
                 .with_check(self.settings_page.is_some()),
         ]);
@@ -199,6 +203,7 @@ impl Shell {
                 Feature::Downloads => shell.toggle_panel(Panel::Downloads, window, cx),
                 Feature::Extensions => shell.extensions_open = !shell.extensions_open,
                 Feature::ToggleSidebar => shell.toggle_compact(window, cx),
+                Feature::Fullscreen => shell.toggle_fullscreen(window, cx),
                 Feature::Settings => shell.toggle_settings(window, cx),
             }
             cx.notify();

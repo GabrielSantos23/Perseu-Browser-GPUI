@@ -96,6 +96,8 @@ impl Global for Theme {}
 
 const MIN_LAYER_ALPHA: f32 = 0.2;
 const MAX_LAYER_ALPHA: f32 = 0.88;
+/// Light mode keeps the space colors pastel, so dark text stays readable.
+const LIGHT_LAYER_SCALE: f32 = 0.5;
 const BASE_GRADIENT_ANGLE: f32 = 122.;
 const BASE_GRADIENT_END: f32 = 0.75;
 const OVERLAY_ANGLE: f32 = 180.;
@@ -113,25 +115,21 @@ pub const ACCENT_PRESETS: [u32; 8] = [
     0x5AA9F0,
 ];
 const DARK_CANVAS: u32 = 0x17171CFF;
-const OVERLAY_AVERAGE: f32 = OVERLAY_MAX_ALPHA / 2.;
+const LIGHT_CANVAS: u32 = 0xF3F3F6FF;
 
-/// A theme color laid over the dark window color at the alpha `intensity`
-/// gives; always the dark one, so the space looks the same in both schemes.
-fn layer(color: u32, intensity: f32) -> Hsla {
+/// A theme color laid over the window color of the scheme at the alpha
+/// `intensity` gives.
+fn layer(color: u32, intensity: f32, light: bool) -> Hsla {
     let strength = intensity.clamp(0.0, 1.0);
     let alpha = MIN_LAYER_ALPHA + (MAX_LAYER_ALPHA - MIN_LAYER_ALPHA) * strength * strength;
-    tint(hex(DARK_CANVAS), rgb(color).into(), alpha)
-}
-
-/// The sidebar's color averaged over its area.
-fn average_background(space: SpaceTheme, intensity: f32) -> Hsla {
-    match space {
-        SpaceTheme::Solid(color) => layer(color, intensity),
-        SpaceTheme::Gradient(start, end) => mix(layer(start, intensity), layer(end, intensity)),
-        SpaceTheme::Triple(start, end, third) => {
-            mix(layer(start, intensity), layer(end, intensity))
-                .blend(layer(third, intensity).opacity(OVERLAY_AVERAGE))
-        }
+    if light {
+        tint(
+            hex(LIGHT_CANVAS),
+            rgb(color).into(),
+            alpha * LIGHT_LAYER_SCALE,
+        )
+    } else {
+        tint(hex(DARK_CANVAS), rgb(color).into(), alpha)
     }
 }
 
@@ -179,7 +177,7 @@ impl Colors {
     pub fn light(accent: Hsla) -> Self {
         Self {
             light: true,
-            canvas: hex(0xF3F3F6FF),
+            canvas: hex(LIGHT_CANVAS),
             surface: hex(0xFFFFFFFF),
             surface_raised: hex(0xF8F8FBFF),
             surface_hover: hex(0x00000012),
@@ -211,17 +209,6 @@ fn wants_dark_text(background: Hsla) -> bool {
     };
     let luminance = 0.2126 * linear(rgba.r) + 0.7152 * linear(rgba.g) + 0.0722 * linear(rgba.b);
     (luminance + 0.05) / 0.05 > 1.05 / (luminance + 0.05)
-}
-
-fn mix(a: Hsla, b: Hsla) -> Hsla {
-    let (a, b) = (gpui::Rgba::from(a), gpui::Rgba::from(b));
-    gpui::Rgba {
-        r: (a.r + b.r) / 2.,
-        g: (a.g + b.g) / 2.,
-        b: (a.b + b.b) / 2.,
-        a: 1.,
-    }
-    .into()
 }
 
 impl Default for Metrics {
@@ -360,10 +347,8 @@ impl Theme {
         cx.global::<Self>()
     }
 
-    /// Switches between the dark and light colors so text and icons keep
-    /// contrast with the space's sidebar.
-    pub fn sync_scheme(space: SpaceTheme, intensity: f32, cx: &mut App) {
-        let light = wants_dark_text(average_background(space, intensity));
+    /// Switches between the dark and light colors.
+    pub fn sync_scheme(light: bool, cx: &mut App) {
         if Self::of(cx).colors.light == light {
             return;
         }
@@ -392,7 +377,8 @@ impl Theme {
     /// `intensity` (0 to 1). A third color fades in from the top as an overlay.
     pub fn space_palette(&self, space: SpaceTheme, intensity: f32) -> SpacePalette {
         let accent: Hsla = rgb(space.accent()).into();
-        let layer = |color: u32| layer(color, intensity);
+        let light = self.colors.light;
+        let layer = |color: u32| layer(color, intensity, light);
         let base = |start: u32, end: u32| {
             linear_gradient(
                 BASE_GRADIENT_ANGLE,
@@ -435,19 +421,14 @@ mod tests {
     }
 
     #[test]
-    fn bright_spaces_switch_to_dark_text() {
-        assert!(wants_dark_text(average_background(
-            SpaceTheme::Solid(0xFFE000),
-            1.0
-        )));
-        assert!(!wants_dark_text(average_background(
-            SpaceTheme::Solid(0xFFE000),
-            0.0
-        )));
-        assert!(!wants_dark_text(average_background(
-            SpaceTheme::Solid(0x3D3DFF),
-            1.0
-        )));
+    fn each_scheme_keeps_its_text_readable_on_strong_colors() {
+        for color in [0x3D3DFF, 0x8E1B3A, 0x101010, 0x2E7D32] {
+            assert!(
+                wants_dark_text(layer(color, 1.0, true)),
+                "{color:06x} light"
+            );
+        }
+        assert!(!wants_dark_text(layer(0x3D3DFF, 1.0, false)));
     }
 
     #[test]

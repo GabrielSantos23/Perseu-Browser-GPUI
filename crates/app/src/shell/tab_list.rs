@@ -339,9 +339,7 @@ impl Shell {
         let is_active = self.browser.active_tab_id() == Some(id);
         let runtime = self.runtime.get(&id);
         let runtime_favicon = runtime.and_then(|runtime| runtime.favicon.clone());
-        let audio = runtime
-            .filter(|runtime| runtime.playing_audio || runtime.muted)
-            .map(|runtime| runtime.muted);
+        let audio = self.tab_audio(id);
         let unloaded = tab.is_pinned() && runtime.is_none_or(|runtime| runtime.view.is_none());
         let drifted = tab.has_drifted();
         let dragged = DraggedTab {
@@ -422,7 +420,7 @@ impl Shell {
                     .child(dragged.title),
             )
             .children(audio.map(|muted| self.render_audio_button(id, muted, cx)))
-            .child(self.render_close_button(id, cx))
+            .child(self.render_close_button(id, tab.is_pinned(), cx))
     }
 
     fn render_row_favicon(
@@ -448,7 +446,20 @@ impl Shell {
             .child(favicon(image, cx))
     }
 
-    fn render_audio_button(&self, id: TabId, muted: bool, cx: &mut Context<Self>) -> AnyElement {
+    /// `Some(muted)` while the tab plays sound or is muted.
+    pub(super) fn tab_audio(&self, id: TabId) -> Option<bool> {
+        self.runtime
+            .get(&id)
+            .filter(|runtime| runtime.playing_audio || runtime.muted)
+            .map(|runtime| runtime.muted)
+    }
+
+    pub(super) fn render_audio_button(
+        &self,
+        id: TabId,
+        muted: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = Theme::of(cx);
         let hover_bg = theme.colors.surface_hover;
         let (glyph, label) = if muted {
@@ -483,7 +494,13 @@ impl Shell {
             .into_any_element()
     }
 
-    fn render_close_button(&self, id: TabId, cx: &mut Context<Self>) -> impl IntoElement {
+    /// Closes the tab; a pinned tab is only unloaded, so it shows a minus.
+    fn render_close_button(
+        &self,
+        id: TabId,
+        pinned: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let theme = Theme::of(cx);
         let hover_bg = theme.colors.surface_hover;
         let size = theme.metrics.nav_button_size - theme.metrics.radius_md;
@@ -508,10 +525,10 @@ impl Shell {
             }))
             .tooltip(tooltip_with_keys(
                 Side::Left,
-                "Close tab",
+                if pinned { "Unload tab" } else { "Close tab" },
                 actions::CloseTab,
             ))
-            .child(icons::CLOSE)
+            .child(if pinned { icons::MINUS } else { icons::CLOSE })
     }
 
     fn render_divider(&self, cx: &mut Context<Self>) -> impl IntoElement {

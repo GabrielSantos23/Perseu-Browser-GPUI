@@ -17,7 +17,7 @@ use gpui_kit::component::{Disableable as _, Sizable};
 
 use super::history_page::{dropdown, empty_state};
 use super::tab_ops::now;
-use super::{Shell, archive};
+use super::{Shell, UpdateCheck, archive};
 use crate::actions;
 use crate::context_menu::MenuEntry;
 use crate::icons::{self, Icon};
@@ -870,7 +870,7 @@ impl Shell {
             ],
             Section::Extensions => self.extensions_groups(cx),
             Section::Keyboard => vec![self.shortcuts_group(page, cx)],
-            Section::About => vec![about_group()],
+            Section::About => vec![self.about_group(cx)],
         }
     }
 
@@ -1526,15 +1526,52 @@ impl Shell {
     }
 }
 
-fn about_group() -> Group {
-    let runtime = webview_host::runtime_version().unwrap_or_else(|| "Not found".into());
-    Group {
-        title: browser_core::APP_NAME,
-        note: Some(ICON_CREDIT),
-        rows: vec![
-            Row::new("Version").describe(env!("CARGO_PKG_VERSION")),
-            Row::new("WebView2 runtime").describe(runtime),
-        ],
+impl Shell {
+    fn about_group(&self, cx: &mut Context<Self>) -> Group {
+        let runtime = webview_host::runtime_version().unwrap_or_else(|| "Not found".into());
+        Group {
+            title: browser_core::APP_NAME,
+            note: Some(ICON_CREDIT),
+            rows: vec![
+                Row::new("Version").describe(env!("CARGO_PKG_VERSION")),
+                self.updates_row(cx),
+                Row::new("WebView2 runtime").describe(runtime),
+            ],
+        }
+    }
+
+    fn updates_row(&self, cx: &mut Context<Self>) -> Row {
+        let row = Row::new("Updates");
+        if !crate::updater::enabled() {
+            return row.describe("This build does not update itself.");
+        }
+        if let Some(release) = &self.update {
+            let state = if self.update_download.is_some() {
+                "installs when you close perseu"
+            } else {
+                "is downloading"
+            };
+            return row
+                .describe(format!("Version {} {state}.", release.version))
+                .control(
+                    chip("update-install", "Restart to update", true, cx).on_click(
+                        cx.listener(|this, _, window, cx| this.install_update(window, cx)),
+                    ),
+                );
+        }
+        let status = match &self.update_check {
+            UpdateCheck::Idle => "Checked each time perseu opens.".to_string(),
+            UpdateCheck::Checking => "Checking\u{2026}".to_string(),
+            UpdateCheck::Done => "perseu is up to date.".to_string(),
+            UpdateCheck::Failed(error) => format!("Could not check: {error}"),
+        };
+        row.describe(status).control(
+            chip("update-check", "Check for updates", false, cx)
+                .disabled(self.update_check == UpdateCheck::Checking)
+                .on_click(
+                    cx.listener(|this, _, window, cx| this.check_for_updates(true, window, cx)),
+                ),
+        )
     }
 }
 

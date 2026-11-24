@@ -37,6 +37,7 @@ actions!(
         SwitchSpace8,
         SwitchSpace9,
         ToggleCompactMode,
+        ToggleFullscreen,
         ZoomIn,
         ZoomOut,
         ResetZoom,
@@ -92,6 +93,7 @@ const SHORTCUTS: &[(&str, ActionFactory)] = &[
     ("ctrl-alt-8", || Box::new(SwitchSpace8)),
     ("ctrl-alt-9", || Box::new(SwitchSpace9)),
     ("ctrl-s", || Box::new(ToggleCompactMode)),
+    ("f11", || Box::new(ToggleFullscreen)),
     ("ctrl-shift-n", || Box::new(NewPrivateWindow)),
     ("ctrl-h", || Box::new(ShowHistory)),
 ];

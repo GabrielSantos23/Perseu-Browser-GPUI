@@ -10,6 +10,55 @@ use crate::native;
 use crate::theme::Theme;
 
 const CURSOR_GAP_X: f32 = 12.;
+/// A click before the tooltip appeared silences the next one shown this
+/// close to it: it belongs to what was clicked.
+const CLICK_REACH: f32 = 24.;
+
+/// What a click silenced: the label of the tooltip shown (or about to be
+/// shown) for the clicked item, until the pointer reaches another item.
+#[derive(Clone)]
+enum Silenced {
+    Label(SharedString),
+    Next(gpui::Point<Pixels>),
+}
+
+thread_local! {
+    static SHOWN: std::cell::RefCell<Option<SharedString>> = const { std::cell::RefCell::new(None) };
+    static SILENCED: std::cell::RefCell<Option<Silenced>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Call on every mouse press: the clicked item's tooltip stays hidden
+/// while the pointer is still on it.
+pub fn clicked(window: &Window) {
+    let silenced = match SHOWN.with(|shown| shown.borrow().clone()) {
+        Some(label) => Silenced::Label(label),
+        None => Silenced::Next(window.mouse_position()),
+    };
+    SILENCED.with(|cell| *cell.borrow_mut() = Some(silenced));
+}
+
+/// Whether `label`'s tooltip should stay hidden after a click.
+fn silenced(label: &SharedString, mouse: gpui::Point<Pixels>) -> bool {
+    SILENCED.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        let hide = match cell.clone() {
+            Some(Silenced::Label(silenced)) => silenced == *label,
+            Some(Silenced::Next(at)) => {
+                let near = (mouse.x - at.x).abs() < px(CLICK_REACH)
+                    && (mouse.y - at.y).abs() < px(CLICK_REACH);
+                if near {
+                    *cell = Some(Silenced::Label(label.clone()));
+                }
+                near
+            }
+            None => false,
+        };
+        if !hide {
+            *cell = None;
+        }
+        hide
+    })
+}
 const CURSOR_GAP_Y: f32 = 18.;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -110,6 +159,11 @@ fn show(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyView {
+    let anchor = cx.new(|_| TooltipAnchor { popup: None });
+    if silenced(&label, window.mouse_position()) {
+        return anchor.into();
+    }
+    SHOWN.with(|shown| *shown.borrow_mut() = Some(label.clone()));
     let metrics = &Theme::of(cx).metrics;
     let mut width = text_width(&label, window, cx) + metrics.radius_md * 2. + px(4.);
     if let Some(keys) = &keys {
@@ -132,7 +186,7 @@ fn show(
     }
     let display_id = display.map(|display| display.id());
 
-    let anchor = cx.new(|cx| {
+    anchor.update(cx, |_, cx| {
         cx.observe_window_activation(window, |anchor: &mut TooltipAnchor, window, cx| {
             if !window.is_window_active()
                 && let Some(handle) = anchor.popup.take()
@@ -141,7 +195,6 @@ fn show(
             }
         })
         .detach();
-        TooltipAnchor { popup: None }
     });
     let weak = anchor.downgrade();
     cx.defer(move |cx| {
@@ -181,6 +234,7 @@ fn show(
         }
     });
     cx.observe_release(&anchor, |anchor, cx| {
+        SHOWN.with(|shown| *shown.borrow_mut() = None);
         if let Some(handle) = anchor.popup.take() {
             close(handle, cx);
         }
@@ -263,5 +317,16 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(key_label(&alt, "left"), "Alt+Left");
+    }
+
+    #[test]
+    fn a_click_silences_its_own_tooltip_until_another_shows() {
+        let label: SharedString = "Close tab".into();
+        let other: SharedString = "Mute tab".into();
+        SILENCED.with(|cell| *cell.borrow_mut() = Some(Silenced::Next(point(px(10.), px(10.)))));
+        assert!(silenced(&label, point(px(14.), px(12.))));
+        assert!(silenced(&label, point(px(90.), px(12.))));
+        assert!(!silenced(&other, point(px(200.), px(12.))));
+        assert!(!silenced(&label, point(px(14.), px(12.))));
     }
 }

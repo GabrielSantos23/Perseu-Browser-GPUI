@@ -38,18 +38,25 @@ pub fn bind_keys(cx: &mut App) {
     ]);
 }
 
-/// Zephium's dark and light menu palettes.
-struct MenuColors {
-    background: Rgba,
-    plate: Rgba,
-    separator: Rgba,
-    border: Rgba,
-    text: Rgba,
-    disabled: Rgba,
-    shortcut: Rgba,
+/// Zephium's dark and light menu palettes, shared by every menu-like popup.
+pub struct MenuColors {
+    pub background: Rgba,
+    pub plate: Rgba,
+    pub separator: Rgba,
+    pub border: Rgba,
+    pub text: Rgba,
+    pub disabled: Rgba,
+    pub shortcut: Rgba,
 }
 
+/// Corner radius of menus and menu-like popups.
+pub const MENU_CORNER: Pixels = px(MENU_RADIUS);
+
 impl MenuColors {
+    pub fn of(cx: &App) -> Self {
+        Self::new(Theme::of(cx).colors.light)
+    }
+
     fn new(light: bool) -> Self {
         if light {
             Self {

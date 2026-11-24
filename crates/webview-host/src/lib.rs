@@ -20,8 +20,10 @@ use anyhow::{Context as _, Result};
 use raw_window_handle::{HandleError, HasWindowHandle, RawWindowHandle, WindowHandle};
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_BROWSING_DATA_KINDS_ALL_PROFILE, COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY,
-    GetAvailableCoreWebView2BrowserVersionString, ICoreWebView2, ICoreWebView2_3, ICoreWebView2_8,
-    ICoreWebView2_13, ICoreWebView2Environment, ICoreWebView2Profile2, ICoreWebView2Settings8,
+    COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO, COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK,
+    COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT, GetAvailableCoreWebView2BrowserVersionString,
+    ICoreWebView2, ICoreWebView2_3, ICoreWebView2_8, ICoreWebView2_13, ICoreWebView2Environment,
+    ICoreWebView2Profile2, ICoreWebView2Settings8,
 };
 use webview2_com::{
     CallDevToolsProtocolMethodCompletedHandler, ClearBrowsingDataCompletedHandler, take_pwstr,
@@ -75,7 +77,7 @@ pub enum WebViewEvent {
         /// Width and height the opener asked for, in CSS pixels, when it did
         /// (`window.open` features, an extension's `windows.create`).
         size: Option<(f64, f64)>,
-        /// Set for an extension's own window: the opener waits for a view
+        /// Set unless the request became a peek: the opener waits for a view
         /// to show it in, handed over with [`BrowserView::adopt_new_window`]
         /// or refused with [`decline_new_window`]. One of them must follow.
         request: Option<u64>,
@@ -83,6 +85,9 @@ pub enum WebViewEvent {
     /// The page asked to close its window (`window.close()`, an extension's
     /// `windows.remove`). Nothing was closed; the host decides.
     CloseRequested,
+    /// An element of the page entered (`true`) or left fullscreen, as a
+    /// video player does. The host decides how to show it.
+    FullscreenChanged(bool),
     /// A key chord accepted by [`BrowserViewOptions::intercept`] was pressed
     /// while the page had focus. The page did not receive it.
     Shortcut(KeyChord),
@@ -619,6 +624,34 @@ impl BrowserView {
                 &completed,
             )
         });
+    }
+
+    /// Asks pages of this view's profile for a light (`Some(true)`), dark
+    /// or system-matching (`None`) look, through `prefers-color-scheme`.
+    pub fn set_color_scheme(&self, light: Option<bool>) {
+        let scheme = match light {
+            None => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO,
+            Some(true) => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT,
+            Some(false) => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK,
+        };
+        let result = self
+            .webview
+            .webview()
+            .cast::<ICoreWebView2_13>()
+            .and_then(|webview| unsafe { webview.Profile()?.SetPreferredColorScheme(scheme) });
+        if let Err(error) = result {
+            tracing::warn!("setting the page color scheme failed: {error}");
+        }
+    }
+
+    /// Takes the page's fullscreen element, if any, out of fullscreen.
+    pub fn exit_fullscreen(&self) {
+        if let Err(error) = self
+            .webview
+            .evaluate_script("document.fullscreenElement && document.exitFullscreen()")
+        {
+            tracing::warn!("leaving page fullscreen failed: {error}");
+        }
     }
 
     /// Empties the profile's HTTP cache, then reloads without it.

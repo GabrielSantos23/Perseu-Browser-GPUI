@@ -38,9 +38,10 @@ impl Shell {
         id
     }
 
-    /// An extension's own window (`windows.create`, Bitwarden's passkey
-    /// prompt) as a tab whose view the opener gets back as that window.
-    pub(super) fn open_extension_window(
+    /// A page's new window (`window.open`, an extension's `windows.create`)
+    /// as a tab whose view the opener gets back as that window, so sign-in
+    /// popups can reach `window.opener`.
+    pub(super) fn open_popup_tab(
         &mut self,
         url: String,
         request: Option<u64>,
@@ -69,6 +70,11 @@ impl Shell {
         self.settings_page = None;
         self.history_page = None;
         self.take_keyboard_from_pages();
+        if let Some(super::fullscreen::Fullscreen::Page(tab)) = self.fullscreen
+            && self.browser.active_tab_id() != Some(tab)
+        {
+            self.leave_fullscreen(window, cx);
+        }
         let shown = [self.browser.active_tab_id(), self.active_partner()];
         for id in shown.into_iter().flatten() {
             self.ensure_view(id, window, cx);
@@ -283,6 +289,12 @@ impl Shell {
             return;
         }
         runtime.view_pending = false;
+        if let Some(view) = &view {
+            view.set_color_scheme(self.page_scheme());
+        }
+        let Some(runtime) = self.runtime.get_mut(&id) else {
+            return;
+        };
         runtime.view = view;
         // The WebView2 profile exists from the first attached view on, so this
         // is where the session's extensions load into it.
@@ -316,7 +328,9 @@ impl Shell {
     }
 
     pub(super) fn show_only_active_view(&self) {
-        let shown = if self.settings_page.is_some() || self.history_page.is_some() {
+        let shown = if self.fullscreen.is_some() {
+            [self.fullscreen_tab(), None]
+        } else if self.settings_page.is_some() || self.history_page.is_some() {
             [None, None]
         } else {
             [self.browser.active_tab_id(), self.active_partner()]

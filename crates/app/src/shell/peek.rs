@@ -532,26 +532,38 @@ impl Shell {
                 url,
                 request: Some(request),
                 ..
-            } => {
+            } if url.starts_with("chrome-extension:") => {
                 self.in_main_window(cx, move |shell, window, cx| {
-                    shell.open_extension_window(url, Some(request), OpenPosition::End, window, cx);
+                    shell.open_popup_tab(url, Some(request), OpenPosition::End, window, cx);
                 });
                 return;
             }
-            WebViewEvent::NewWindowRequested { url, .. }
+            WebViewEvent::NewWindowRequested { url, request, .. }
                 if peek.tab.url.starts_with("chrome-extension:") =>
             {
                 self.in_main_window(cx, move |shell, window, cx| {
-                    shell.open_tab(url, OpenPosition::End, window, cx);
+                    shell.open_popup_tab(url, request, OpenPosition::End, window, cx);
                 });
                 return;
             }
-            WebViewEvent::PeekRequested(url)
-            | WebViewEvent::NewWindowRequested {
+            // The peek shows popups in place, so their openers get no window.
+            WebViewEvent::NewWindowRequested {
                 url,
-                user_initiated: true,
+                user_initiated,
+                request,
                 ..
             } => {
+                if let Some(request) = request {
+                    webview_host::decline_new_window(request);
+                }
+                if !user_initiated {
+                    return;
+                }
+                if let Some(page) = peek.view.read(cx).page.clone() {
+                    page.navigate(&url);
+                }
+            }
+            WebViewEvent::PeekRequested(url) => {
                 if let Some(page) = peek.view.read(cx).page.clone() {
                     page.navigate(&url);
                 }
@@ -560,8 +572,8 @@ impl Shell {
                 webview_host::answer_permission(id, false);
                 return;
             }
-            WebViewEvent::NewWindowRequested { .. }
-            | WebViewEvent::ExternalSchemeRequested { .. }
+            WebViewEvent::ExternalSchemeRequested { .. }
+            | WebViewEvent::FullscreenChanged(_)
             | WebViewEvent::SecurityChanged(_)
             | WebViewEvent::ZoomChanged(_)
             | WebViewEvent::AudioChanged { .. } => return,

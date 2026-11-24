@@ -92,9 +92,12 @@ impl Shell {
         side: Side,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let id = tab.id;
+        let audio = self
+            .tab_audio(id)
+            .map(|muted| self.render_audio_button(id, muted, cx));
         let theme = Theme::of(cx);
         let accent = self.palette(cx).accent;
-        let id = tab.id;
         let is_active = self.browser.active_tab_id() == Some(id);
         let runtime = self.runtime.get(&id);
         let loaded = runtime.is_some_and(|runtime| runtime.view.is_some());
@@ -108,6 +111,7 @@ impl Shell {
 
         div()
             .id(("essential", id.value()))
+            .relative()
             .flex()
             .items_center()
             .justify_center()
@@ -146,6 +150,7 @@ impl Shell {
                     .when(!loaded, |icon| icon.opacity(UNLOADED_OPACITY))
                     .child(essential_icon(favicon, cx)),
             )
+            .children(audio.map(|button| div().absolute().top_0().right_0().child(button)))
     }
 }
 

@@ -5,11 +5,12 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
     ICoreWebView2Controller,
 };
 use webview2_com::{
-    AcceleratorKeyPressedEventHandler, FaviconChangedEventHandler, FocusChangedEventHandler,
-    GetFaviconCompletedHandler, HistoryChangedEventHandler,
-    IsDocumentPlayingAudioChangedEventHandler, IsMutedChangedEventHandler,
-    NavigationCompletedEventHandler, NavigationStartingEventHandler, SourceChangedEventHandler,
-    WindowCloseRequestedEventHandler, ZoomFactorChangedEventHandler, take_pwstr,
+    AcceleratorKeyPressedEventHandler, ContainsFullScreenElementChangedEventHandler,
+    FaviconChangedEventHandler, FocusChangedEventHandler, GetFaviconCompletedHandler,
+    HistoryChangedEventHandler, IsDocumentPlayingAudioChangedEventHandler,
+    IsMutedChangedEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler,
+    SourceChangedEventHandler, WindowCloseRequestedEventHandler, ZoomFactorChangedEventHandler,
+    take_pwstr,
 };
 use windows::Win32::System::Com::IStream;
 use windows::core::{BOOL, Interface, PWSTR};
@@ -35,6 +36,7 @@ pub(crate) fn subscribe(
     crate::downloads::subscribe(webview, sink.clone())?;
     on_audio_changed(webview, sink.clone())?;
     on_close_requested(webview, sink.clone())?;
+    on_fullscreen_changed(webview, sink.clone())?;
     on_favicon_changed(webview, sink)
 }
 
@@ -45,6 +47,20 @@ fn on_close_requested(webview: &ICoreWebView2, sink: EventSink) -> windows::core
     }));
     let mut token = 0;
     unsafe { webview.add_WindowCloseRequested(&handler, &mut token) }
+}
+
+fn on_fullscreen_changed(webview: &ICoreWebView2, sink: EventSink) -> windows::core::Result<()> {
+    let handler =
+        ContainsFullScreenElementChangedEventHandler::create(Box::new(move |sender, _| {
+            let mut fullscreen = BOOL::default();
+            if let Some(sender) = sender {
+                unsafe { sender.ContainsFullScreenElement(&mut fullscreen)? };
+            }
+            sink(WebViewEvent::FullscreenChanged(fullscreen.as_bool()));
+            Ok(())
+        }));
+    let mut token = 0;
+    unsafe { webview.add_ContainsFullScreenElementChanged(&handler, &mut token) }
 }
 
 fn on_accelerator_key(

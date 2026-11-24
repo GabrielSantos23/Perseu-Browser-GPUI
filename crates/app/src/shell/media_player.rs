@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use browser_core::tabs::TabId;
 use futures::StreamExt;
@@ -38,6 +38,8 @@ const CONTROL_ROW: f32 = 28.;
 const SITE_ROW: f32 = 16.;
 const TITLE_ROW: f32 = 22.;
 const CONTROL_BUTTON: f32 = 24.;
+/// How long the player stays after its tab goes quiet (a pause, a gap).
+const QUIET_HOLD: Duration = Duration::from_secs(10);
 
 pub(super) struct MediaState {
     info: Option<MediaInfo>,
@@ -47,6 +49,8 @@ pub(super) struct MediaState {
     pub(super) identify: Identify,
     /// The hidden page that signs audio for Shazam, kept once started.
     pub(super) signer: Option<Rc<BrowserView>>,
+    /// The tab that last went quiet, and when.
+    quiet: Option<(TabId, Instant)>,
 }
 
 impl MediaState {
@@ -73,6 +77,7 @@ impl MediaState {
             hover_changes: 0,
             identify: Identify::Idle,
             signer: None,
+            quiet: None,
         }
     }
 }
@@ -89,6 +94,45 @@ impl Shell {
                     .find(|(_, runtime)| runtime.muted)
                     .map(|(id, _)| *id)
             })
+            .or_else(|| {
+                self.media
+                    .quiet
+                    .filter(|(id, since)| {
+                        since.elapsed() < QUIET_HOLD && self.runtime.contains_key(id)
+                    })
+                    .map(|(id, _)| id)
+            })
+    }
+
+    /// Keeps the player for [`QUIET_HOLD`] after a tab stops playing.
+    pub(super) fn on_audio_changed(
+        &mut self,
+        id: TabId,
+        was_playing: bool,
+        playing: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if playing {
+            self.media.quiet = None;
+            return;
+        }
+        if !was_playing {
+            return;
+        }
+        let since = Instant::now();
+        self.media.quiet = Some((id, since));
+        cx.spawn(async move |shell, cx| {
+            cx.background_executor().timer(QUIET_HOLD).await;
+            shell
+                .update(cx, |shell, cx| {
+                    if shell.media.quiet == Some((id, since)) {
+                        shell.media.quiet = None;
+                        cx.notify();
+                    }
+                })
+                .ok();
+        })
+        .detach();
     }
 
     fn send_media(&self, command: MediaCommand) {

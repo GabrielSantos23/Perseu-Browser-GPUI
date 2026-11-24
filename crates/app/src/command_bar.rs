@@ -142,9 +142,13 @@ pub fn bind_keys(cx: &mut App) {
 
 pub struct CommandBar {
     input: Entity<InputState>,
-    candidates: Vec<Candidate<Target>>,
+    candidates: Arc<Vec<Candidate<Target>>>,
     engine: SearchEngine,
     results: Vec<Candidate<Target>>,
+    /// How many of `results` come from the typed text rather than ranking.
+    typed: usize,
+    /// Ranking runs off the UI thread: history can hold thousands of visits.
+    ranking: Option<gpui::Task<()>>,
     /// The bang typed as `!trigger ` and shown as its site's icon.
     bang: Option<bangs::Site>,
     bang_icon: Option<Arc<Image>>,
@@ -183,9 +187,11 @@ impl CommandBar {
         ];
         let mut bar = Self {
             input,
-            candidates,
+            candidates: Arc::new(candidates),
             engine,
             results: Vec::new(),
+            typed: 0,
+            ranking: None,
             bang: None,
             bang_icon: None,
             selected: 0,
@@ -286,13 +292,32 @@ impl CommandBar {
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
         let query = self.input.read(cx).value().to_string();
-        self.results = match self.bang {
+        let typed = match self.bang {
             Some(site) => vec![bang_candidate(site, &query)],
             None => typed_candidates(&query, &self.engine),
         };
-        self.results.extend(rank(&query, &self.candidates));
+        // The earlier ranking stays until the new one is ready; Enter only
+        // needs the typed rows, which are always current.
+        let ranked = self.results.split_off(self.typed);
+        self.typed = typed.len();
+        self.results = typed;
+        self.results.extend(ranked);
         self.selected = 0;
         cx.notify();
+        let candidates = self.candidates.clone();
+        let ranked = cx.background_spawn(async move { rank(&query, &candidates) });
+        self.ranking = Some(cx.spawn(async move |this, cx| {
+            let ranked = ranked.await;
+            this.update(cx, |this, cx| {
+                this.results.truncate(this.typed);
+                this.results.extend(ranked);
+                if this.selected >= this.results.len() {
+                    this.selected = 0;
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
     }
 
     /// The text typed in the bar, with its bang written out.

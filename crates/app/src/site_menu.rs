@@ -7,6 +7,7 @@ use gpui::{
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 
+use crate::context_menu::{MENU_CORNER, MenuColors};
 use crate::icons;
 use crate::theme::Theme;
 
@@ -100,7 +101,7 @@ impl SiteMenu {
             .h(px(BORDER))
             .my(theme.metrics.radius_md / 2.)
             .mx(theme.metrics.radius_md)
-            .bg(theme.colors.border)
+            .bg(MenuColors::of(cx).separator)
             .into_any_element()
     }
 
@@ -126,7 +127,7 @@ impl SiteMenu {
                 .into_any_element(),
             self.row(cx)
                 .text_size(theme.metrics.text_sm)
-                .text_color(theme.colors.text_muted)
+                .text_color(MenuColors::of(cx).shortcut)
                 .child(icon(glyph, color, cx))
                 .child(text)
                 .into_any_element(),
@@ -165,7 +166,7 @@ impl SiteMenu {
         event: fn() -> SiteMenuEvent,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let hover_bg = Theme::of(cx).colors.surface_active;
+        let hover_bg = MenuColors::of(cx).plate;
         self.row(cx)
             .id(id)
             .rounded(Theme::of(cx).metrics.radius_md)
@@ -184,7 +185,7 @@ impl SiteMenu {
         let mut rows = vec![
             self.row(cx)
                 .text_size(theme.metrics.text_sm)
-                .text_color(theme.colors.text_muted)
+                .text_color(MenuColors::of(cx).shortcut)
                 .child("Permissions")
                 .into_any_element(),
         ];
@@ -204,7 +205,7 @@ impl SiteMenu {
                             .truncate()
                             .child(permission_label(&key)),
                     )
-                    .child(div().text_color(theme.colors.text_muted).child(state))
+                    .child(div().text_color(MenuColors::of(cx).shortcut).child(state))
                     .child(
                         small_button(ElementId::Name(format!("reset-{key}").into()))
                             .label("Reset")
@@ -221,7 +222,7 @@ impl SiteMenu {
     fn clear_row(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::of(cx);
         if !self.confirming_clear {
-            let hover_bg = theme.colors.surface_active;
+            let hover_bg = MenuColors::of(cx).plate;
             return self
                 .row(cx)
                 .id("clear-site-data")
@@ -265,7 +266,8 @@ impl SiteMenu {
 
 impl Render for SiteMenu {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let text = Theme::of(cx).colors.text;
+        let menu = MenuColors::of(cx);
+        let text = menu.text.into();
         let copy_link = self.item(
             "copy-link",
             "Copy link",
@@ -288,14 +290,14 @@ impl Render for SiteMenu {
             .flex()
             .flex_col()
             .p(metrics.radius_sm)
-            .rounded(metrics.radius_popover)
-            .bg(theme.colors.surface_raised)
+            .rounded(MENU_CORNER)
+            .bg(menu.background)
             .border_1()
-            .border_color(theme.colors.border)
+            .border_color(menu.border)
             .font_family(theme.fonts.ui.clone())
             .font_weight(theme.fonts.ui_weight)
             .text_size(metrics.text_md)
-            .text_color(theme.colors.text)
+            .text_color(menu.text)
             .on_key_down(cx.listener(|_, event: &gpui::KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" {
                     cx.emit(SiteMenuEvent::Dismiss);

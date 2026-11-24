@@ -53,6 +53,7 @@ impl Shell {
         tab: TabId,
         url: String,
         user_initiated: bool,
+        request: Option<u64>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -62,8 +63,11 @@ impl Shell {
             .map_or(0, |runtime| runtime.windows_opened);
         if may_open_window(user_initiated, opened) {
             self.update_runtime(tab, |runtime| runtime.windows_opened += 1);
-            self.open_tab(url, OpenPosition::After(tab), window, cx);
+            self.open_popup_tab(url, request, OpenPosition::After(tab), window, cx);
             return;
+        }
+        if let Some(request) = request {
+            webview_host::decline_new_window(request);
         }
         tracing::info!("blocked a popup to {url}");
         self.update_runtime(tab, |runtime| {
