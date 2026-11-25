@@ -65,7 +65,9 @@ impl Shell {
             loop {
                 cx.background_executor().timer(POLL_INTERVAL).await;
                 let polled = shell.update_in(cx, |shell, window, cx| shell.poll_hover(window, cx));
-                if polled.is_err() {
+                // A failed update can be a nested message pump borrowing the
+                // window; only a dropped shell ends the poll.
+                if polled.is_err() && shell.upgrade().is_none() {
                     break;
                 }
             }
@@ -88,6 +90,8 @@ impl Shell {
         let edge = metrics.frame_inset + metrics.radius_sm;
         let in_window_x = local.x >= self.title_overlay_left() && local.x <= bounds.size.width;
         let now = Instant::now();
+        // The downloads or archive popup takes focus, but it is still ours.
+        let active = window.is_window_active() || self.panel.is_some();
 
         if self.settings.hide_title_bar {
             if self.title_reveal.shown() {
@@ -99,7 +103,7 @@ impl Shell {
                     self.set_title_revealed(false, cx);
                 }
             } else {
-                let in_hot_zone = window.is_window_active()
+                let in_hot_zone = active
                     && in_window_x
                     && local.y >= -frame_inset
                     && local.y <= edge;
@@ -121,21 +125,30 @@ impl Shell {
         if self.reveal.shown() {
             let over_sidebar =
                 in_body && local.x >= Pixels::ZERO && local.x <= frame_inset + self.sidebar_width;
+            let over_panel = self
+                .panel
+                .as_ref()
+                .is_some_and(|open| open.bounds.contains(&local));
             let keep = over_sidebar
+                || over_panel
+                || self.download_landing()
                 || cx.has_active_drag()
                 || self.renaming_space
                 || self.menu.is_some()
                 || self.theme_picker.is_some()
-                || self.panel.is_some()
                 || self.extension_popup_open()
                 || self.store_offer.is_some();
             if self.compact_hover.wants_hide(keep, now) {
+                // The panel sits beside the sidebar and leaves with it.
+                if let Some(kind) = self.panel.as_ref().map(|open| open.kind) {
+                    self.set_panel_shown(kind, false);
+                }
                 self.set_revealed(false, cx);
             }
             return;
         }
         let in_hot_zone =
-            in_body && window.is_window_active() && local.x >= -frame_inset && local.x <= edge;
+            in_body && active && local.x >= -frame_inset && local.x <= edge;
         if self.compact_hover.wants_show(in_hot_zone, now) {
             self.set_revealed(true, cx);
         }

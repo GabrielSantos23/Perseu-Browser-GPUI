@@ -302,6 +302,8 @@ impl Shell {
                 cx.defer_in(window, |shell, window, cx| shell.new_tab(window, cx));
             }
         }
+        // After the shown tab, so it loads first.
+        shell.load_essentials(window, cx);
         if layout.compact {
             shell.toggle_compact(window, cx);
         }
@@ -614,6 +616,7 @@ impl Shell {
                         id: download, url, ..
                     } => {
                         self.download_flight = Some((*download, std::time::Instant::now()));
+                        self.reveal_sidebar(cx);
                         if self.is_untouched_tab_for(id, url) {
                             self.hide_download_tab(id, *download, window, cx)
                         }

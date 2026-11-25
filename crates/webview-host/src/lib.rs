@@ -364,6 +364,12 @@ pub struct BrowserView {
     applied_bounds: Cell<Option<ContentBounds>>,
 }
 
+impl Drop for BrowserView {
+    fn drop(&mut self) {
+        guard::decline_windows_of(&self.webview.webview());
+    }
+}
+
 impl BrowserView {
     /// Creates a webview as a child of `parent` and starts loading `options.url`.
     ///
@@ -597,9 +603,10 @@ impl BrowserView {
 
     /// Shows the new window reported with `request` in this view, which
     /// must not have loaded anything yet. The opener gets this view as its
-    /// window: it can message and close it.
-    pub fn adopt_new_window(&self, request: u64) {
-        guard::adopt_new_window(request, &self.webview.webview());
+    /// window: it can message and close it. False when the request is gone
+    /// (its opener closed first); the view should then load the page itself.
+    pub fn adopt_new_window(&self, request: u64) -> bool {
+        guard::adopt_new_window(request, &self.webview.webview())
     }
 
     /// Reloads the current page without using cached files.

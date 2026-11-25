@@ -363,14 +363,14 @@ impl TabStrip {
     }
 
     /// Takes a tab out of the strip without remembering it as closed.
-    /// If it was selected, a neighbour becomes selected.
+    /// If it was selected, the tab used before it becomes selected.
     pub fn remove(&mut self, id: TabId, now: Timestamp) -> Option<Tab> {
         let index = self.index_of(id)?;
         self.unsplit(id);
         let tab = self.tabs.remove(index);
         if self.active == Some(id) {
             self.active = None;
-            self.select_neighbour_of(index, now);
+            self.select_last_used(None, now);
         }
         Some(tab)
     }
@@ -387,15 +387,14 @@ impl TabStrip {
 
     /// Closes a tab. Unpinned tabs are removed and remembered for
     /// [`TabStrip::reopen_closed`]; pinned tabs stay and reset to their pinned
-    /// page. If the tab was selected, its right neighbour (or else its left
-    /// one) becomes selected.
+    /// page. If the tab was selected, the tab used before it becomes selected.
     pub fn close(&mut self, id: TabId, now: Timestamp) -> Option<CloseOutcome> {
         let index = self.index_of(id)?;
         if self.tabs[index].is_pinned() {
             self.unsplit(id);
             self.tabs[index].reset_to_pinned();
             if self.active == Some(id) {
-                self.select_neighbour_of_kept(index, now);
+                self.select_last_used(Some(id), now);
             }
             return Some(CloseOutcome::Unloaded);
         }
@@ -592,24 +591,15 @@ impl TabStrip {
         }
     }
 
-    fn select_neighbour_of(&mut self, removed_index: usize, now: Timestamp) {
-        let neighbour = self
+    /// Selects the tab used most recently, other than `except`.
+    fn select_last_used(&mut self, except: Option<TabId>, now: Timestamp) {
+        let last = self
             .tabs
-            .get(removed_index)
-            .or_else(|| removed_index.checked_sub(1).and_then(|i| self.tabs.get(i)))
+            .iter()
+            .filter(|tab| Some(tab.id) != except)
+            .max_by_key(|tab| tab.last_active)
             .map(|tab| tab.id);
-        if let Some(next) = neighbour {
-            self.select(next, now);
-        }
-    }
-
-    fn select_neighbour_of_kept(&mut self, index: usize, now: Timestamp) {
-        let neighbour = self
-            .tabs
-            .get(index + 1)
-            .or_else(|| index.checked_sub(1).and_then(|i| self.tabs.get(i)))
-            .map(|tab| tab.id);
-        if let Some(next) = neighbour {
+        if let Some(next) = last {
             self.select(next, now);
         }
     }
@@ -678,12 +668,14 @@ mod tests {
     }
 
     #[test]
-    fn closing_active_tab_selects_right_then_left_neighbour() {
+    fn closing_active_tab_selects_the_tab_used_before_it() {
         let (mut strip, ids) = strip_with(&["a", "b", "c"]);
-        strip.select(ids[1], 0);
-        strip.close(ids[1], 0);
+        strip.select(ids[0], 1);
+        strip.select(ids[2], 2);
+        strip.select(ids[1], 3);
+        strip.close(ids[1], 4);
         assert_eq!(strip.active_id(), Some(ids[2]));
-        strip.close(ids[2], 0);
+        strip.close(ids[2], 5);
         assert_eq!(strip.active_id(), Some(ids[0]));
         strip.close(ids[0], 0);
         assert_eq!(strip.active_id(), None);

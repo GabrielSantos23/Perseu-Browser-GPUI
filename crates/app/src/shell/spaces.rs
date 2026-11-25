@@ -102,6 +102,13 @@ impl Shell {
         }
     }
 
+    /// Whether a download's flight to the downloads button is still on
+    /// screen; the auto-hiding sidebar stays out for it.
+    pub(super) fn download_landing(&self) -> bool {
+        self.download_flight
+            .is_some_and(|(_, started)| started.elapsed() < DOWNLOAD_FLIGHT)
+    }
+
     /// A download icon flying from the page to the downloads button in an
     /// arc, shrinking as it lands, when a download starts.
     pub(super) fn render_download_flight(

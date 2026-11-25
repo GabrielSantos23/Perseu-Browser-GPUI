@@ -23,8 +23,10 @@ pub(super) enum Panel {
 }
 
 pub(super) struct OpenPanel {
-    kind: Panel,
+    pub(super) kind: Panel,
     window: AnyWindowHandle,
+    /// Where the popup sits, in main-window coordinates.
+    pub(super) bounds: Bounds<gpui::Pixels>,
     _events: Subscription,
 }
 
@@ -107,7 +109,7 @@ impl Shell {
         }
     }
 
-    fn set_panel_shown(&mut self, kind: Panel, shown: bool) {
+    pub(super) fn set_panel_shown(&mut self, kind: Panel, shown: bool) {
         match kind {
             Panel::Downloads => self.downloads_open = shown,
             Panel::Archive => self.archive_open = shown,
@@ -152,10 +154,11 @@ impl Shell {
         let max_x = (window_bounds.size.width - width - inset).max(inset);
         let x = (sidebar_left + self.sidebar_width + metrics.radius_md).clamp(inset, max_x);
         let y = (window_bounds.size.height - inset - height).max(inset);
+        let bounds = Bounds::new(point(x, y), size(width, height));
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(
-                window_bounds.origin + point(x, y),
-                size(width, height),
+                window_bounds.origin + bounds.origin,
+                bounds.size,
             ))),
             titlebar: None,
             kind: WindowKind::PopUp,
@@ -199,6 +202,7 @@ impl Shell {
                 shell.panel = Some(OpenPanel {
                     kind,
                     window: handle,
+                    bounds,
                     _events: events,
                 });
                 cx.notify();

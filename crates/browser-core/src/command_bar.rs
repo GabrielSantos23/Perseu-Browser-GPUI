@@ -7,6 +7,8 @@ use crate::fuzzy;
 pub enum Group {
     /// An address typed by the user; shown first when present.
     Address,
+    /// The most visited sites; the top ones when empty, matching ones when typed.
+    Frequent,
     /// Open tabs.
     Tabs,
     /// Pinned tabs and essentials.
@@ -23,14 +25,15 @@ impl Group {
     fn limit(self) -> usize {
         match self {
             Self::Address | Self::Search => 1,
-            Self::Tabs | Self::Pinned | Self::History => 5,
+            Self::Frequent | Self::Tabs | Self::Pinned | Self::History => 5,
             Self::Commands => 4,
         }
     }
 
     fn shown_when_empty(self) -> bool {
-        matches!(self, Self::Tabs | Self::Pinned | Self::Commands)
+        matches!(self, Self::Frequent | Self::Tabs | Self::Commands)
     }
+
 }
 
 /// Something the command bar can offer.
@@ -48,14 +51,16 @@ pub struct Candidate<T> {
 
 /// Filters and orders candidates for `query`: grouped in [`Group`] order,
 /// best matches first within a group (ties keep input order), each group
-/// capped. With an empty query only tabs, pinned and commands are shown, in
-/// input order.
+/// capped. With an empty query only frequent sites, tabs and commands are
+/// shown, in input order; pinned tabs wait for a query that matches them.
 pub fn rank<T: Clone>(query: &str, candidates: &[Candidate<T>]) -> Vec<Candidate<T>> {
     let empty = query.trim().is_empty();
     let mut scored: Vec<(Group, u32, usize)> = candidates
         .iter()
         .enumerate()
-        .filter(|(_, candidate)| !empty || candidate.group.shown_when_empty())
+        .filter(|(_, candidate)| {
+            !empty || candidate.group.shown_when_empty()
+        })
         .filter_map(|(index, candidate)| {
             let title = fuzzy::score(query, &candidate.title);
             let subtitle = fuzzy::score(query, &candidate.subtitle);
@@ -149,8 +154,19 @@ mod tests {
             candidate(Group::Tabs, "first"),
             candidate(Group::Search, "s"),
             candidate(Group::Commands, "c"),
+            candidate(Group::Frequent, "f"),
         ];
-        assert_eq!(titles(&rank("", &candidates)), ["second", "first", "c"]);
+        assert_eq!(titles(&rank("", &candidates)), ["f", "second", "first", "c"]);
+    }
+
+    #[test]
+    fn pinned_waits_for_a_query_and_frequent_matches_it() {
+        let candidates = [
+            candidate(Group::Pinned, "mail"),
+            candidate(Group::Frequent, "mail site"),
+        ];
+        assert!(rank("", &candidates).iter().all(|c| c.group == Group::Frequent));
+        assert_eq!(titles(&rank("mail", &candidates)), ["mail site", "mail"]);
     }
 
     #[test]

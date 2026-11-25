@@ -16,7 +16,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 
 use crate::icons;
 use crate::motion;
-use crate::theme::Theme;
+use crate::theme::{SpacePalette, Theme};
 
 actions!(
     command_bar,
@@ -153,6 +153,8 @@ pub struct CommandBar {
     bang: Option<bangs::Site>,
     bang_icon: Option<Arc<Image>>,
     selected: usize,
+    /// The current space's colors, so the bar matches the chosen theme.
+    palette: SpacePalette,
     height: MotionValue,
     target_height: Option<f32>,
     _subscriptions: Vec<Subscription>,
@@ -165,6 +167,7 @@ impl CommandBar {
         candidates: Vec<Candidate<Target>>,
         engine: SearchEngine,
         initial_text: String,
+        palette: SpacePalette,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -189,6 +192,7 @@ impl CommandBar {
             input,
             candidates: Arc::new(candidates),
             engine,
+            palette,
             results: Vec::new(),
             typed: 0,
             ranking: None,
@@ -409,7 +413,7 @@ impl CommandBar {
             .px(theme.metrics.radius_md * 1.5)
             .rounded(theme.metrics.radius_md)
             .when(selected, |row| {
-                row.bg(theme.colors.accent.opacity(SELECTED_ROW_TINT))
+                row.bg(self.palette.accent.opacity(SELECTED_ROW_TINT))
             })
             .when(!selected, |row| row.hover(move |style| style.bg(hover_bg)))
             .on_click(cx.listener(move |this, _, _, cx| this.confirm(index, cx)))
@@ -532,6 +536,18 @@ impl Render for CommandBar {
                     .border_color(theme.colors.border)
                     .shadow_lg()
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .children(
+                        [Some(self.palette.sidebar), self.palette.overlay]
+                            .into_iter()
+                            .flatten()
+                            .map(|layer| {
+                                div()
+                                    .absolute()
+                                    .inset_0()
+                                    .rounded(theme.metrics.radius_popover)
+                                    .bg(layer)
+                            }),
+                    )
                     .child(
                         div()
                             .flex()
@@ -621,6 +637,7 @@ fn group_starts(results: &[Candidate<Target>]) -> Vec<usize> {
 
 fn group_label(group: Group) -> Option<&'static str> {
     match group {
+        Group::Frequent => Some("Frequently used"),
         Group::Tabs => Some("Tabs"),
         Group::Pinned => Some("Pinned"),
         Group::Commands => Some("Commands"),
@@ -631,7 +648,7 @@ fn group_label(group: Group) -> Option<&'static str> {
 
 fn group_glyph(group: Group) -> icons::Icon {
     match group {
-        Group::Address | Group::Tabs | Group::History => icons::GLOBE,
+        Group::Address | Group::Frequent | Group::Tabs | Group::History => icons::GLOBE,
         Group::Pinned => icons::PIN,
         Group::Commands => icons::COMMAND,
         Group::Search => icons::SEARCH,

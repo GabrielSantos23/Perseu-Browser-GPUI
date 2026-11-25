@@ -155,10 +155,13 @@ pub fn adapt(folder: &Path) -> Result<bool> {
 /// would leave the folder is refused.
 fn inside(folder: &Path, relative: &str) -> Result<PathBuf> {
     let relative = Path::new(relative.trim_start_matches('/'));
-    if !relative
-        .components()
-        .all(|part| matches!(part, std::path::Component::Normal(_)))
-    {
+    // `./js/background.js` (SponsorBlock) stays inside; `..` does not.
+    if !relative.components().all(|part| {
+        matches!(
+            part,
+            std::path::Component::Normal(_) | std::path::Component::CurDir
+        )
+    }) {
         anyhow::bail!("{} names a file outside its folder", folder.display());
     }
     Ok(folder.join(relative))
@@ -602,6 +605,16 @@ run();
             r#"{"manifest_version":3,"name":"x","version":"1","action":{"default_popup":"../outside.html"}}"#,
         );
         assert!(prepare_popup(&folder).is_err());
+    }
+
+    #[test]
+    fn paths_starting_with_dot_slash_stay_inside() {
+        let folder = Path::new("ext");
+        assert_eq!(
+            inside(folder, "./js/background.js").unwrap(),
+            folder.join("./js/background.js")
+        );
+        assert!(inside(folder, "./../x.js").is_err());
     }
 
     #[test]

@@ -90,7 +90,8 @@ Automated tests run with `cargo test`. Source-scanning tests in `crates/webview-
 - **Decision.** Every new-window request is handled by the host; WebView2 never opens its own window.
   - Requests without a user gesture are blocked, and the sidebar shows "Pop-up blocked: <host>" with "Open once".
   - With a gesture, a page may open at most 5 windows, counted per page and reset on navigation. Further requests are blocked the same way.
-- **Code.** `browser-core/src/security.rs` (`may_open_window`, `MAX_WINDOWS_PER_PAGE`), `app/src/shell/site_guard.rs`.
+  - An allowed window opens as a tab whose view the opener gets back, so `window.opener` works. If the opener closes first, its waiting requests are declined before its view goes away (finishing them later crashes WebView2), and the tab loads the URL by itself.
+- **Code.** `browser-core/src/security.rs` (`may_open_window`, `MAX_WINDOWS_PER_PAGE`), `app/src/shell/site_guard.rs`, `webview-host/src/guard.rs` (`decline_windows_of`).
 - **Tests.**
   - `security::tests::windows_need_a_gesture_and_stay_under_the_limit`.
   - Manual: a page calling `window.open` from a timer shows the blocked notice, and "Open once" opens it.

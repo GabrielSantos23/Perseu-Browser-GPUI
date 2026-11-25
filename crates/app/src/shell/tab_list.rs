@@ -4,7 +4,8 @@ use browser_core::tabs::{Section, Split, Tab, TabId};
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, AppContext, ClickEvent, Context, DragMoveEvent,
     Image, InteractiveElement, IntoElement, MouseButton, MouseUpEvent, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Window, div, img, prelude::FluentBuilder, px,
+    PathBuilder, SharedString, StatefulInteractiveElement, Styled, Window, canvas, div, img, point,
+    prelude::FluentBuilder, px,
 };
 
 use super::Shell;
@@ -21,6 +22,11 @@ const DRIFT_MARKER: &str = "/";
 const SELECTED_STRENGTH: f32 = 0.22;
 const DROP_TO_PIN: &str = "Drop to pin";
 const LABEL_FADE: std::time::Duration = std::time::Duration::from_millis(160);
+/// Sleeping (unloaded) tabs step back so open ones stand out.
+const UNLOADED_ICON_OPACITY: f32 = 0.6;
+const SPIN: std::time::Duration = std::time::Duration::from_millis(800);
+/// How much of the circle the loading arc covers.
+const SPIN_ARC: f32 = 0.7;
 
 #[derive(Clone)]
 pub(super) struct DraggedTab {
@@ -339,6 +345,7 @@ impl Shell {
         let is_active = self.browser.active_tab_id() == Some(id);
         let runtime = self.runtime.get(&id);
         let runtime_favicon = runtime.and_then(|runtime| runtime.favicon.clone());
+        let loading = runtime.is_some_and(|runtime| runtime.loading);
         let audio = self.tab_audio(id);
         let unloaded = tab.is_pinned() && runtime.is_none_or(|runtime| runtime.view.is_none());
         let drifted = tab.has_drifted();
@@ -407,7 +414,17 @@ impl Shell {
                         this.drop_tab_before(dragged.id, id, cx)
                     }))
             })
-            .child(self.render_row_favicon(id, runtime_favicon, drifted, cx))
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .when(unloaded, |icon| icon.opacity(UNLOADED_ICON_OPACITY))
+                    .child(if loading {
+                        loading_spinner(id, cx)
+                    } else {
+                        self.render_row_favicon(id, runtime_favicon, drifted, cx)
+                            .into_any_element()
+                    }),
+            )
             .when(drifted, |row| {
                 row.child(div().text_color(muted).child(DRIFT_MARKER))
             })
@@ -627,6 +644,52 @@ impl Shell {
                 }),
             )
     }
+}
+
+/// A spinning arc in place of the favicon while the tab's page loads.
+fn loading_spinner(id: TabId, cx: &App) -> AnyElement {
+    let theme = Theme::of(cx);
+    let color = theme.colors.text_muted;
+    div()
+        .flex_shrink_0()
+        .size(theme.metrics.favicon_size)
+        .with_animation(
+            ("tab-loading", id.value()),
+            Animation::new(SPIN).repeat(),
+            move |icon, delta| {
+                icon.child(
+                    canvas(
+                        |_, _, _| {},
+                        move |bounds, _, window, _| {
+                            let stroke = px(1.5);
+                            let radius = bounds.size.width / 2. - stroke;
+                            let center = bounds.center();
+                            let at = |turn: f32| {
+                                let angle = turn * std::f32::consts::TAU;
+                                point(
+                                    center.x + radius * angle.cos(),
+                                    center.y + radius * angle.sin(),
+                                )
+                            };
+                            let mut arc = PathBuilder::stroke(stroke);
+                            arc.move_to(at(delta));
+                            arc.arc_to(
+                                point(radius, radius),
+                                px(0.),
+                                SPIN_ARC > 0.5,
+                                true,
+                                at(delta + SPIN_ARC),
+                            );
+                            if let Ok(arc) = arc.build() {
+                                window.paint_path(arc, color);
+                            }
+                        },
+                    )
+                    .size_full(),
+                )
+            },
+        )
+        .into_any_element()
 }
 
 pub(super) fn favicon(image: Option<Arc<Image>>, cx: &App) -> AnyElement {

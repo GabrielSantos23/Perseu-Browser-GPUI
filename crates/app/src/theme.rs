@@ -137,6 +137,9 @@ const ICONS_REGULAR: &str = "uicons-regular-rounded";
 const ICONS_SOLID: &str = "uicons-solid-rounded";
 const FLUENT_ICONS: &str = "Segoe Fluent Icons";
 const MDL2_ICONS: &str = "Segoe MDL2 Assets";
+/// San Francisco, when the user has installed it (Apple's license does not
+/// let us ship it), else Windows' own UI font.
+const UI_FONTS: [&str; 4] = ["SF Pro Text", "SF Pro Display", "SF Pro", "Segoe UI"];
 
 fn hex(value: u32) -> Hsla {
     rgba(value).into()
@@ -273,19 +276,26 @@ impl Fonts {
         if let Err(error) = cx.text_system().add_fonts(bundled) {
             tracing::error!("failed to load the icon fonts: {error:#}");
         }
-        let system_icons = if cx
-            .text_system()
-            .all_font_names()
-            .iter()
-            .any(|name| name == FLUENT_ICONS)
-        {
+        let installed = cx.text_system().all_font_names();
+        let ui = UI_FONTS
+            .into_iter()
+            .find(|font| installed.iter().any(|name| name == font))
+            .unwrap_or("Segoe UI");
+        let system_icons = if installed.iter().any(|name| name == FLUENT_ICONS) {
             FLUENT_ICONS
         } else {
             MDL2_ICONS
         };
         Self {
-            ui: "Segoe UI".into(),
-            ui_weight: gpui::FontWeight::SEMIBOLD,
+            ui: ui.into(),
+            // The lightest upright faces: the common SF Pro font pack has its
+            // thin weights only as italics, which a lighter weight would pick.
+            // shortcut: assumes that pack; Apple's full SF Pro could go THIN.
+            ui_weight: if ui == "Segoe UI" {
+                gpui::FontWeight::LIGHT
+            } else {
+                gpui::FontWeight::NORMAL
+            },
             system_icons: system_icons.into(),
             icons: ICONS_REGULAR.into(),
             icons_solid: ICONS_SOLID.into(),

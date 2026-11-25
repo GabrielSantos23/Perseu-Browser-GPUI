@@ -161,6 +161,17 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Ctrl+N counts the essentials first, as the sidebar shows them.
+        let essentials: Vec<TabId> = if self.browser.private_shown() {
+            Vec::new()
+        } else {
+            self.browser.essentials().iter().map(|tab| tab.id).collect()
+        };
+        if let Some(&id) = essentials.get(index) {
+            self.activate(id, window, cx);
+            return;
+        }
+        let index = index - essentials.len();
         if let Some(id) = self.browser.space_mut().tabs.select_index(index, now()) {
             self.activate(id, window, cx);
         }
@@ -228,6 +239,18 @@ impl Shell {
         }
     }
 
+    /// Loads the essentials in the background, so web apps kept there (mail,
+    /// chat) receive messages and notify without being opened first.
+    pub(super) fn load_essentials(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.browser.private_shown() {
+            return;
+        }
+        let ids: Vec<TabId> = self.browser.essentials().iter().map(|tab| tab.id).collect();
+        for id in ids {
+            self.ensure_view(id, window, cx);
+        }
+    }
+
     fn ensure_view(&mut self, id: TabId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(url) = self.browser.tab(id).map(|tab| tab.url.clone()) else {
             return;
@@ -245,6 +268,7 @@ impl Shell {
             }
         };
         runtime.view_pending = true;
+        let page = url.clone();
         let request = ViewRequest {
             id,
             url: if adopt.is_some() { String::new() } else { url },
@@ -262,7 +286,11 @@ impl Shell {
         cx.spawn_in(window, async move |shell, cx| {
             let view = request.create();
             match (&view, adopt) {
-                (Some(view), Some(adopt)) => view.adopt_new_window(adopt),
+                (Some(view), Some(adopt)) => {
+                    if !view.adopt_new_window(adopt) {
+                        view.navigate(&page);
+                    }
+                }
                 (None, Some(adopt)) => webview_host::decline_new_window(adopt),
                 _ => {}
             }

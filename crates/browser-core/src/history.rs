@@ -85,6 +85,25 @@ impl History {
         &self.entries
     }
 
+    /// The `limit` most visited sites, each as its most visited page.
+    pub fn frequent_sites(&self, limit: usize) -> Vec<&HistoryEntry> {
+        let mut sites: std::collections::HashMap<String, (u32, &HistoryEntry)> =
+            std::collections::HashMap::new();
+        for entry in &self.entries {
+            let Some(origin) = crate::security::origin_of(&entry.url) else {
+                continue;
+            };
+            let site = sites.entry(origin).or_insert((0, entry));
+            site.0 += entry.visit_count;
+            if entry.visit_count > site.1.visit_count {
+                site.1 = entry;
+            }
+        }
+        let mut sites: Vec<(u32, &HistoryEntry)> = sites.into_values().collect();
+        sites.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.last_visit.cmp(&a.1.last_visit)));
+        sites.into_iter().take(limit).map(|(_, top)| top).collect()
+    }
+
     /// Records a committed navigation. Internal and blank pages are ignored.
     /// The in-memory list is updated even when the database write fails.
     pub fn record_visit(&mut self, url: &str, now: Timestamp) -> Result<()> {
@@ -229,6 +248,27 @@ impl History {
 mod tests {
     use super::*;
     use crate::store::temp_dir;
+
+    #[test]
+    fn frequent_sites_add_up_pages_and_show_the_top_one() {
+        let mut history = History::new();
+        for (url, at) in [
+            ("https://a.com/x", 1),
+            ("https://a.com/y", 2),
+            ("https://a.com/y", 3),
+            ("https://b.com/", 4),
+            ("https://b.com/", 5),
+            ("https://c.com/", 6),
+        ] {
+            history.record_visit(url, at).unwrap();
+        }
+        let urls: Vec<&str> = history
+            .frequent_sites(2)
+            .iter()
+            .map(|entry| entry.url.as_str())
+            .collect();
+        assert_eq!(urls, ["https://a.com/y", "https://b.com/"]);
+    }
 
     #[test]
     fn revisits_move_to_front_and_count() {

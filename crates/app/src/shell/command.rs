@@ -16,6 +16,9 @@ use crate::page;
 use crate::theme::Theme;
 
 const WIDTH_SHARE_OF_CONTENT: f32 = 0.6;
+/// How many sites "Frequently used" lists before anything is typed.
+/// Sites offered to the frequent group; the ranker shows the top few that match.
+const FREQUENT_SITES: usize = 50;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OpenIn {
@@ -55,6 +58,7 @@ impl Shell {
         self.close_command_bar(cx);
         let candidates = self.command_candidates();
         let engine = self.settings.engine();
+        let palette = self.palette(cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(self.command_bar_bounds(window, cx))),
             titlebar: None,
@@ -71,7 +75,7 @@ impl Shell {
             if let Ok(handle) = popup.window_handle() {
                 native::remove_frame_shadow_and_border(handle.as_raw());
             }
-            let view = cx.new(|cx| CommandBar::new(candidates, engine, initial_text, popup, cx));
+            let view = cx.new(|cx| CommandBar::new(candidates, engine, initial_text, palette, popup, cx));
             bar = Some(view.clone());
             view
         });
@@ -262,6 +266,24 @@ impl Shell {
                 subtitle: entry.url.clone(),
                 target: Target::Open(entry.url.clone()),
             });
-        tabs.chain(commands).chain(history).collect()
+        let frequent = self
+            .history
+            .frequent_sites(FREQUENT_SITES)
+            .into_iter()
+            .map(|entry| Candidate {
+                group: Group::Frequent,
+                title: if entry.title.is_empty() {
+                    entry.url.clone()
+                } else {
+                    entry.title.clone()
+                },
+                subtitle: entry.url.clone(),
+                target: Target::Open(entry.url.clone()),
+            });
+        frequent
+            .chain(tabs)
+            .chain(commands)
+            .chain(history)
+            .collect()
     }
 }

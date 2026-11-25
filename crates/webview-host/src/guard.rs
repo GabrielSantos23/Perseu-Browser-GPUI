@@ -37,6 +37,9 @@ struct PendingPermission {
 struct PendingWindow {
     args: ICoreWebView2NewWindowRequestedEventArgs,
     deferral: ICoreWebView2Deferral,
+    /// The view that asked; finishing the request after it is gone crashes
+    /// the runtime.
+    opener: windows::core::IUnknown,
 }
 
 thread_local! {
@@ -54,9 +57,30 @@ pub fn decline_new_window(id: u64) {
     }
 }
 
-pub(crate) fn adopt_new_window(id: u64, webview: &ICoreWebView2) {
-    let Some(pending) = PENDING_WINDOWS.with(|pending| pending.borrow_mut().remove(&id)) else {
+/// Lets go of the window requests `opener` still has waiting, before it
+/// closes.
+pub(crate) fn decline_windows_of(opener: &ICoreWebView2) {
+    let Ok(opener) = opener.cast::<windows::core::IUnknown>() else {
         return;
+    };
+    let ids: Vec<u64> = PENDING_WINDOWS.with(|pending| {
+        pending
+            .borrow()
+            .iter()
+            .filter(|(_, window)| window.opener == opener)
+            .map(|(id, _)| *id)
+            .collect()
+    });
+    for id in ids {
+        decline_new_window(id);
+    }
+}
+
+/// Hands `webview` to the request as its new window. False when the request
+/// is gone (its opener closed), so the view must load the page itself.
+pub(crate) fn adopt_new_window(id: u64, webview: &ICoreWebView2) -> bool {
+    let Some(pending) = PENDING_WINDOWS.with(|pending| pending.borrow_mut().remove(&id)) else {
+        return false;
     };
     let result = unsafe {
         pending
@@ -67,7 +91,9 @@ pub(crate) fn adopt_new_window(id: u64, webview: &ICoreWebView2) {
     if let Err(error) = result {
         tracing::warn!("failed to hand a view to a new window: {error}");
         let _ = unsafe { pending.deferral.Complete() };
+        return false;
     }
+    true
 }
 
 pub(crate) fn subscribe(
@@ -108,6 +134,7 @@ fn on_new_window(
     sink: EventSink,
     peek_modifier: Option<LinkModifier>,
 ) -> windows::core::Result<()> {
+    let opener = webview.cast::<windows::core::IUnknown>()?;
     let handler = NewWindowRequestedEventHandler::create(Box::new(move |_, args| {
         let Some(args) = args else {
             return Ok(());
@@ -144,6 +171,7 @@ fn on_new_window(
                     PendingWindow {
                         args: args.clone(),
                         deferral,
+                        opener: opener.clone(),
                     },
                 )
             });

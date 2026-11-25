@@ -21,6 +21,8 @@ pub(super) enum TabAction {
     Reload,
     Duplicate,
     CopyLink,
+    Mute,
+    Unmute,
     Pin,
     Unpin,
     AddToEssentials,
@@ -368,6 +370,14 @@ impl Shell {
             entries.push(MenuEntry::item("Duplicate", TabAction::Duplicate));
             entries.push(MenuEntry::item("Copy link", TabAction::CopyLink));
         }
+        // Only a loaded tab has a page to mute.
+        if let Some(runtime) = self.runtime.get(&id).filter(|runtime| runtime.view.is_some()) {
+            entries.push(if runtime.muted {
+                MenuEntry::item("Unmute tab", TabAction::Unmute)
+            } else {
+                MenuEntry::item("Mute tab", TabAction::Mute)
+            });
+        }
         entries.push(MenuEntry::Separator);
         if self.browser.is_essential(id) {
             entries.push(MenuEntry::item(
@@ -454,6 +464,15 @@ impl Shell {
             TabAction::CopyLink => {
                 if let Some(url) = url {
                     self.copy_link(url, window, cx);
+                }
+            }
+            TabAction::Mute | TabAction::Unmute => {
+                if let Some(view) = self
+                    .runtime
+                    .get(&id)
+                    .and_then(|runtime| runtime.view.clone())
+                {
+                    view.set_muted(action == TabAction::Mute);
                 }
             }
             TabAction::Pin => {
